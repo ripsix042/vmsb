@@ -2,26 +2,25 @@ const path = require('path');
 const fs = require('fs');
 const envPath = path.join(__dirname, '.env');
 
-if (!fs.existsSync(envPath)) {
-  console.error('Missing .env file at', envPath);
-  process.exit(1);
+if (fs.existsSync(envPath)) {
+  require('dotenv').config({ path: envPath });
 }
-require('dotenv').config({ path: envPath });
 
-// Read MONGODB_URI directly from .env (use last occurrence so Atlas overwrites any localhost default)
 let uri = process.env.MONGODB_URI;
-const envContent = fs.readFileSync(envPath, 'utf8');
-for (const line of envContent.split(/\r?\n/)) {
-  const trimmed = line.trim();
-  if (trimmed && !trimmed.startsWith('#') && trimmed.startsWith('MONGODB_URI=')) {
-    uri = trimmed.slice('MONGODB_URI='.length).trim();
-    if ((uri.startsWith('"') && uri.endsWith('"')) || (uri.startsWith("'") && uri.endsWith("'"))) {
-      uri = uri.slice(1, -1);
+if (uri && fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf8');
+  for (const line of envContent.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#') && trimmed.startsWith('MONGODB_URI=')) {
+      uri = trimmed.slice('MONGODB_URI='.length).trim();
+      if ((uri.startsWith('"') && uri.endsWith('"')) || (uri.startsWith("'") && uri.endsWith("'"))) {
+        uri = uri.slice(1, -1);
+      }
     }
   }
 }
 if (!uri || !uri.trim()) {
-  console.error('MONGODB_URI is not set in', envPath);
+  console.error('MONGODB_URI is not set. Add it to .env or set the variable in your host (e.g. Render).');
   process.exit(1);
 }
 if (!uri.startsWith('mongodb+srv://') && !uri.startsWith('mongodb://')) {
@@ -29,14 +28,14 @@ if (!uri.startsWith('mongodb+srv://') && !uri.startsWith('mongodb://')) {
   process.exit(1);
 }
 if (uri.includes('localhost') || uri.includes('127.0.0.1')) {
-  console.error('MONGODB_URI in .env is set to localhost. Replace it with your Atlas connection string and save the file.');
+  console.error('MONGODB_URI is set to localhost. Use an Atlas connection string in production.');
   process.exit(1);
 }
 
 const { isWeakJwtSecret } = require('./config/security');
 const jwtSecret = process.env.JWT_SECRET;
 if (!jwtSecret || !jwtSecret.trim()) {
-  console.error('JWT_SECRET is not set in .env');
+  console.error('JWT_SECRET is not set. Add it to .env or set the variable in your host (e.g. Render).');
   process.exit(1);
 }
 if (process.env.NODE_ENV === 'production' && isWeakJwtSecret(jwtSecret)) {
