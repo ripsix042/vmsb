@@ -1,5 +1,5 @@
 const express = require('express');
-const { getReasons } = require('../controllers/publicController');
+const { getReasons, getHosts } = require('../controllers/publicController');
 const rateLimit = require('express-rate-limit');
 
 const router = express.Router();
@@ -16,5 +16,6 @@ const publicLimiter = rateLimit({
 
 router.use(publicLimiter);
 router.get('/reasons', getReasons);
+router.get('/hosts', getHosts);
 
 module.exports = router;

@@ -8,6 +8,13 @@ const cookieParser = require('cookie-parser');
 const { getCorsOrigin, RATE_LIMITS, isProduction } = require('./config/security');
 const authRoutes = require('./routes/auth');
 const publicRoutes = require('./routes/public');
+const usersRoutes = require('./routes/users');
+const visitRequestsRoutes = require('./routes/visitRequests');
+const visitorsRoutes = require('./routes/visitors');
+const notificationsRoutes = require('./routes/notifications');
+const settingsRoutes = require('./routes/settings');
+const integrationSettingsRoutes = require('./routes/integrationSettings');
+const auditLogsRoutes = require('./routes/auditLogs');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -43,6 +50,13 @@ const apiLimiter = rateLimit({
 });
 app.use(API_PREFIX, apiLimiter);
 app.use(`${API_PREFIX}/auth`, authRoutes);
+app.use(`${API_PREFIX}/users`, usersRoutes);
+app.use(`${API_PREFIX}/visit-requests`, visitRequestsRoutes);
+app.use(`${API_PREFIX}/visitors`, visitorsRoutes);
+app.use(`${API_PREFIX}/notifications`, notificationsRoutes);
+app.use(`${API_PREFIX}/settings`, settingsRoutes);
+app.use(`${API_PREFIX}/integration-settings`, integrationSettingsRoutes);
+app.use(`${API_PREFIX}/audit-logs`, auditLogsRoutes);
 app.use(API_PREFIX, publicRoutes);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

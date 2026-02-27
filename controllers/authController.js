@@ -3,13 +3,15 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const RefreshToken = require('../models/RefreshToken');
-const { unauthorized } = require('../utils/errors');
+const { unauthorized, conflict } = require('../utils/errors');
+const { toFrontendRole } = require('../utils/roleMap');
+const { ROLES, USER_STATUS } = require('../config/constants');
 const {
   JWT_ACCESS_EXPIRES_IN,
-  JWT_REFRESH_EXPIRES_IN,
   USE_HTTPONLY_COOKIE,
   COOKIE_NAME_REFRESH,
   COOKIE_OPTIONS,
+  PASSWORD,
 } = require('../config/security');
 const {
   logLoginSuccess,
@@ -17,6 +19,7 @@ const {
   logLogout,
   logRefreshTokenUsed,
 } = require('../services/securityLogger');
+const { logAudit } = require('../services/auditLog');
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -76,6 +79,12 @@ const login = async (req, res, next) => {
     }
 
     logLoginSuccess(req, user._id, user.email);
+    logAudit({
+      userId: user._id,
+      action: 'login',
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
 
     const payload = {
       token: accessToken,
@@ -85,11 +94,112 @@ const login = async (req, res, next) => {
         email: user.email,
         role: user.role,
       },
+      role: toFrontendRole(user.role),
     };
     if (!USE_HTTPONLY_COOKIE) {
       payload.refreshToken = refreshToken;
     }
     res.json(payload);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /auth/me
+ * Return current session from token. Requires authenticate middleware.
+ */
+const me = async (req, res, next) => {
+  try {
+    const user = req.user;
+    res.json({
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+      },
+      role: toFrontendRole(user.role),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /auth/register
+ * Register a new host (employee). Body: { email, fullName, password }.
+ */
+const register = async (req, res, next) => {
+  try {
+    const { email, fullName, password } = req.body;
+    const existing = await User.findOne({ email }).select('_id');
+    if (existing) {
+      throw conflict('An account with this email already exists');
+    }
+    const passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+    const user = await User.create({
+      fullName,
+      email,
+      passwordHash,
+      role: ROLES.EMPLOYEE,
+      status: USER_STATUS.ACTIVE,
+    });
+    const accessToken = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: JWT_ACCESS_EXPIRES_IN }
+    );
+    res.status(201).json({
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
+      },
+      role: 'employee',
+      token: accessToken,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /auth/kiosk/register
+ * Register a kiosk operator. Body: { username, fullName, password }.
+ * Stored as email: username@kiosk.local for login.
+ */
+const kioskRegister = async (req, res, next) => {
+  try {
+    const { username, fullName, password } = req.body;
+    const email = `${username.toLowerCase().replace(/\s/g, '')}@kiosk.local`;
+    const existing = await User.findOne({ email }).select('_id');
+    if (existing) {
+      throw conflict('A kiosk operator with this username already exists');
+    }
+    const passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+    const user = await User.create({
+      fullName,
+      email,
+      passwordHash,
+      role: ROLES.KIOSK_OPERATOR,
+      status: USER_STATUS.ACTIVE,
+    });
+    const accessToken = jwt.sign(
+      { userId: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: JWT_ACCESS_EXPIRES_IN }
+    );
+    res.status(201).json({
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
+      },
+      role: 'kiosk_operator',
+      token: accessToken,
+    });
   } catch (err) {
     next(err);
   }
@@ -178,4 +288,4 @@ const logout = async (req, res, next) => {
   }
 };
 
-module.exports = { login, refresh, logout };
+module.exports = { login, refresh, logout, me, register, kioskRegister };

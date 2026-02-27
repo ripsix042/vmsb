@@ -54,8 +54,9 @@ connectDB(uri)
     const server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
     });
-    // Socket.io will be attached here in Week 4
     app.set('httpServer', server);
+    const { attachSocket } = require('./services/socket');
+    attachSocket(server);
   })
   .catch((err) => {
     console.error('Failed to start server:', err);
