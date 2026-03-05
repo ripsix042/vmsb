@@ -1,9 +1,9 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const { login, refresh, logout, me, register, kioskRegister } = require('../controllers/authController');
+const { login, refresh, logout, me, register, kioskRegister, otpSend, otpVerify } = require('../controllers/authController');
 const { validate } = require('../middleware/validate');
 const { authenticate } = require('../middleware/auth');
-const { loginSchema, registerSchema, kioskRegisterSchema } = require('../validators/auth');
+const { loginSchema, registerSchema, kioskRegisterSchema, otpSendSchema, otpVerifySchema } = require('../validators/auth');
 const { RATE_LIMITS } = require('../config/security');
 
 const router = express.Router();
@@ -24,10 +24,20 @@ const refreshLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const otpLimiter = rateLimit({
+  windowMs: RATE_LIMITS.otp.windowMs,
+  max: RATE_LIMITS.otp.max,
+  message: { error: 'Too many OTP requests', message: 'Try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 router.get('/me', authenticate, me);
 router.post('/login', loginLimiter, validate(loginSchema), login);
 router.post('/register', validate(registerSchema), register);
 router.post('/kiosk/register', validate(kioskRegisterSchema), kioskRegister);
+router.post('/otp/send', otpLimiter, validate(otpSendSchema), otpSend);
+router.post('/otp/verify', otpLimiter, validate(otpVerifySchema), otpVerify);
 router.post('/refresh', refreshLimiter, refresh);
 router.post('/logout', logout);
 

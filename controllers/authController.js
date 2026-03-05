@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const RefreshToken = require('../models/RefreshToken');
-const { unauthorized, conflict } = require('../utils/errors');
+const { unauthorized, conflict, badRequest } = require('../utils/errors');
 const { toFrontendRole } = require('../utils/roleMap');
 const { ROLES, USER_STATUS } = require('../config/constants');
 const {
@@ -45,18 +45,22 @@ function clearRefreshCookie(res) {
 const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email }).select('+passwordHash');
+    const identifier = (email && typeof email === 'string' ? email.trim() : '') || '';
+    const query = identifier.includes('@')
+      ? { email: identifier.toLowerCase() }
+      : { email: identifier };
+    const user = await User.findOne(query).select('+passwordHash');
     if (!user) {
-      logLoginFailure(req, 'user_not_found', email);
+      logLoginFailure(req, 'user_not_found', identifier);
       throw unauthorized('Invalid email or password');
     }
     const valid = await user.comparePassword(password);
     if (!valid) {
-      logLoginFailure(req, 'invalid_password', email);
+      logLoginFailure(req, 'invalid_password', identifier);
       throw unauthorized('Invalid email or password');
     }
     if (user.status !== 'Active') {
-      logLoginFailure(req, 'account_inactive', email);
+      logLoginFailure(req, 'account_inactive', identifier);
       throw unauthorized('Account is inactive');
     }
 
@@ -78,7 +82,7 @@ const login = async (req, res, next) => {
       setRefreshCookie(res, refreshToken);
     }
 
-    logLoginSuccess(req, user._id, user.email);
+    logLoginSuccess(req, user._id, identifier);
     logAudit({
       userId: user._id,
       action: 'login',
@@ -166,21 +170,22 @@ const register = async (req, res, next) => {
 
 /**
  * POST /auth/kiosk/register
- * Register a kiosk operator. Body: { username, fullName, password }.
- * Stored as email: username@kiosk.local for login.
+ * Register a kiosk operator. Body: { email, fullName, password }.
+ * email is the kiosk operator's phone (stored in User.email for login).
  */
 const kioskRegister = async (req, res, next) => {
   try {
-    const { username, fullName, password } = req.body;
-    const email = `${username.toLowerCase().replace(/\s/g, '')}@kiosk.local`;
-    const existing = await User.findOne({ email }).select('_id');
+    const { email, fullName, password } = req.body;
+    const identifier = (email && typeof email === 'string' ? email.trim() : '') || '';
+    if (!identifier) throw badRequest('Phone or identifier is required');
+    const existing = await User.findOne({ email: identifier }).select('_id');
     if (existing) {
-      throw conflict('A kiosk operator with this username already exists');
+      throw conflict('A kiosk operator with this phone or identifier already exists');
     }
     const passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
     const user = await User.create({
       fullName,
-      email,
+      email: identifier,
       passwordHash,
       role: ROLES.KIOSK_OPERATOR,
       status: USER_STATUS.ACTIVE,
@@ -288,4 +293,44 @@ const logout = async (req, res, next) => {
   }
 };
 
-module.exports = { login, refresh, logout, me, register, kioskRegister };
+const { generateCode, set: setOtp, get: getOtp, remove: removeOtp } = require('../services/otpStore');
+
+/**
+ * POST /auth/otp/send
+ * Body: { phone }. Generate OTP, store it, send (e.g. SMS). Stub: log code in dev.
+ */
+const otpSend = async (req, res, next) => {
+  try {
+    const { phone } = req.body;
+    const normalized = String(phone).trim();
+    const code = generateCode();
+    setOtp(normalized, code);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[OTP] ${normalized} => ${code}`);
+    }
+    res.json({ success: true, sent: true });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /auth/otp/verify
+ * Body: { phone, code }. Verify and invalidate OTP.
+ */
+const otpVerify = async (req, res, next) => {
+  try {
+    const { phone, code } = req.body;
+    const normalized = String(phone).trim();
+    const stored = getOtp(normalized);
+    if (!stored || stored !== String(code).trim()) {
+      throw unauthorized('Invalid or expired code');
+    }
+    removeOtp(normalized);
+    res.json({ success: true, verified: true });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { login, refresh, logout, me, register, kioskRegister, otpSend, otpVerify };

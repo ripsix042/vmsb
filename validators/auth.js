@@ -5,10 +5,8 @@ const loginSchema = Joi.object({
   email: Joi.string()
     .required()
     .max(254)
-    .email({ tlds: { allow: false } })
-    .normalize()
-    .lowercase()
-    .messages({ 'string.empty': 'Email is required' }),
+    .trim()
+    .messages({ 'string.empty': 'Email or phone is required' }),
   password: Joi.string()
     .required()
     .max(PASSWORD.MAX_LENGTH)
@@ -37,12 +35,12 @@ const registerSchema = Joi.object({
 });
 
 const kioskRegisterSchema = Joi.object({
-  username: Joi.string()
+  email: Joi.string()
     .required()
     .min(2)
     .max(64)
     .trim()
-    .messages({ 'string.empty': 'Username is required' }),
+    .messages({ 'string.empty': 'Phone or identifier is required' }),
   fullName: Joi.string()
     .required()
     .min(2)
@@ -56,4 +54,13 @@ const kioskRegisterSchema = Joi.object({
     .messages({ 'string.empty': 'Password is required' }),
 });
 
-module.exports = { loginSchema, registerSchema, kioskRegisterSchema };
+const otpSendSchema = Joi.object({
+  phone: Joi.string().required().trim().min(2).max(30).messages({ 'string.empty': 'Phone is required' }),
+});
+
+const otpVerifySchema = Joi.object({
+  phone: Joi.string().required().trim().min(2).max(30).messages({ 'string.empty': 'Phone is required' }),
+  code: Joi.string().required().length(6).messages({ 'string.empty': 'Code is required' }),
+});
+
+module.exports = { loginSchema, registerSchema, kioskRegisterSchema, otpSendSchema, otpVerifySchema };

@@ -81,8 +81,10 @@ async function createVisitor(req, res, next) {
     const additionalNotes = body.additionalNotes ?? body.notes ?? null;
     const visitType = body.visitType || VISIT_TYPE.PRE_REGISTERED;
     const status = body.status || VISIT_STATUS.SCHEDULED;
-    const scheduledStart = body.scheduledStart ? new Date(body.scheduledStart) : null;
-    const scheduledEnd = body.scheduledEnd ? new Date(body.scheduledEnd) : null;
+    const rawStart = body.scheduledStart || body.meetingStart || body.scheduledTime;
+    const rawEnd = body.scheduledEnd || body.meetingEnd;
+    const scheduledStart = rawStart ? new Date(rawStart) : null;
+    const scheduledEnd = rawEnd ? new Date(rawEnd) : null;
     const visit_id = body.visit_id || generateVisitId();
     const qr_token = body.qr_token || generateQrToken();
 
