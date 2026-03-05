@@ -78,7 +78,7 @@ async function listHosts(req, res, next) {
 
 async function listStaff(req, res, next) {
   try {
-    const users = await User.find().select('-passwordHash').lean();
+    const users = await User.find({ status: USER_STATUS.ACTIVE }).select('-passwordHash').lean();
     const profiles = users.map((u) => ({
       id: u._id.toString(),
       full_name: u.fullName,
@@ -177,7 +177,7 @@ async function deleteStaff(req, res, next) {
     }
     const user = await User.findById(userId);
     if (!user) throw notFound('User not found');
-    await User.findByIdAndUpdate(userId, { status: USER_STATUS.INACTIVE });
+    await User.findByIdAndDelete(userId);
     logAuditFromReq(req, {
       action: 'staff.delete',
       resourceType: 'User',

@@ -18,6 +18,9 @@ const createVisitorSchema = Joi.object({
   status: Joi.string().valid(...Object.values(VISIT_STATUS)),
   scheduledStart: Joi.date().iso(),
   scheduledEnd: Joi.date().iso(),
+  meetingStart: Joi.date().iso(),
+  meetingEnd: Joi.date().iso(),
+  scheduledTime: Joi.date().iso(),
   visit_id: Joi.string().max(20),
   qr_token: Joi.string().max(100),
 })
