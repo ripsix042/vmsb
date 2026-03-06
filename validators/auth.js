@@ -63,4 +63,41 @@ const otpVerifySchema = Joi.object({
   code: Joi.string().required().length(6).messages({ 'string.empty': 'Code is required' }),
 });
 
-module.exports = { loginSchema, registerSchema, kioskRegisterSchema, otpSendSchema, otpVerifySchema };
+const kioskSetupSchema = Joi.object({
+  operatorId: Joi.string().required().trim().messages({ 'string.empty': 'operatorId is required' }),
+  password: Joi.string()
+    .required()
+    .min(PASSWORD.MIN_LENGTH)
+    .max(PASSWORD.MAX_LENGTH)
+    .messages({ 'string.empty': 'Password is required' }),
+});
+
+const kioskEnrollSchema = Joi.object({
+  setupToken: Joi.string().required().trim().messages({ 'string.empty': 'setupToken is required' }),
+  code: Joi.string().required().length(6).messages({ 'string.empty': 'Code is required' }),
+});
+
+const kioskLoginSchema = Joi.object({
+  operatorId: Joi.string().required().trim().messages({ 'string.empty': 'operatorId is required' }),
+  password: Joi.string()
+    .required()
+    .max(PASSWORD.MAX_LENGTH)
+    .messages({ 'string.empty': 'Password is required' }),
+});
+
+const twoFactorVerifySchema = Joi.object({
+  tempToken: Joi.string().required().trim().messages({ 'string.empty': 'tempToken is required' }),
+  code: Joi.string().required().length(6).messages({ 'string.empty': 'Code is required' }),
+});
+
+module.exports = {
+  loginSchema,
+  registerSchema,
+  kioskRegisterSchema,
+  otpSendSchema,
+  otpVerifySchema,
+  kioskSetupSchema,
+  kioskEnrollSchema,
+  kioskLoginSchema,
+  twoFactorVerifySchema,
+};

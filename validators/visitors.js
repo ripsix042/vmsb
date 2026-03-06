@@ -38,10 +38,17 @@ const updateVisitorSchema = Joi.object({
   additionalNotes: Joi.string().max(2000).trim().allow(null, ''),
   status: Joi.string().valid(...Object.values(VISIT_STATUS)),
   scheduledStart: Joi.date().iso().allow(null),
+  scheduled_start: Joi.date().iso().allow(null),
   scheduledEnd: Joi.date().iso().allow(null),
+  scheduled_end: Joi.date().iso().allow(null),
+  meetingStart: Joi.date().iso().allow(null),
+  meetingEnd: Joi.date().iso().allow(null),
+  scheduledTime: Joi.date().iso().allow(null),
   checkInTime: Joi.date().iso().allow(null),
   checkOutTime: Joi.date().iso().allow(null),
   checkedInByUserId: Joi.string().allow(null, ''),
+  checkedInBy: Joi.string().allow(null, ''),
+  checked_in_by: Joi.string().allow(null, ''),
 }).min(1);
 
 module.exports = { createVisitorSchema, updateVisitorSchema };
