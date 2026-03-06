@@ -25,6 +25,8 @@ const visitSchema = new mongoose.Schema(
     checkInTime: { type: Date, default: null },
     checkOutTime: { type: Date, default: null },
     checkedInByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    qr_used: { type: Boolean, default: false },
+    qr_used_at: { type: Date, default: null },
     visit_id: { type: String, required: true, unique: true },
     qr_token: { type: String, sparse: true, unique: true, default: null },
   },
