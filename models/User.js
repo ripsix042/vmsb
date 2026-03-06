@@ -19,6 +19,8 @@ const userSchema = new mongoose.Schema(
       default: USER_STATUS.ACTIVE,
       enum: Object.values(USER_STATUS),
     },
+    twoFactorEnabled: { type: Boolean, default: false },
+    twoFactorSecret: { type: String, default: null, select: false },
   },
   { timestamps: true }
 );

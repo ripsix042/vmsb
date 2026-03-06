@@ -20,6 +20,14 @@ const {
   logRefreshTokenUsed,
 } = require('../services/securityLogger');
 const { logAudit } = require('../services/auditLog');
+const { generateSecret, verifyCode, buildOtpAuthUrl } = require('../services/totp');
+const {
+  setSetupSession,
+  getSetupSession,
+  clearSetupSession,
+  setTempSession,
+  consumeTempSession,
+} = require('../services/kiosk2faStore');
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
@@ -35,6 +43,24 @@ function setRefreshCookie(res, token) {
 
 function clearRefreshCookie(res) {
   res.clearCookie(COOKIE_NAME_REFRESH, { path: COOKIE_OPTIONS.path });
+}
+
+function createAccessPayload(user) {
+  const accessToken = jwt.sign(
+    { userId: user._id },
+    process.env.JWT_SECRET,
+    { expiresIn: JWT_ACCESS_EXPIRES_IN }
+  );
+  return {
+    token: accessToken,
+    user: {
+      id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      role: user.role,
+    },
+    role: toFrontendRole(user.role),
+  };
 }
 
 /**
@@ -211,6 +237,126 @@ const kioskRegister = async (req, res, next) => {
 };
 
 /**
+ * GET /auth/kiosk/operators
+ * List active kiosk operators for dropdown.
+ */
+const listKioskOperators = async (req, res, next) => {
+  try {
+    const users = await User.find({
+      role: ROLES.KIOSK_OPERATOR,
+      status: USER_STATUS.ACTIVE,
+    })
+      .select('fullName')
+      .lean();
+    res.json({
+      operators: users.map((u) => ({ id: u._id.toString(), fullName: u.fullName })),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /auth/kiosk/setup
+ * Body: { operatorId, password }.
+ * Sets password and returns TOTP enrollment data.
+ */
+const kioskSetup = async (req, res, next) => {
+  try {
+    const { operatorId, password } = req.body;
+    const user = await User.findOne({
+      _id: operatorId,
+      role: ROLES.KIOSK_OPERATOR,
+      status: USER_STATUS.ACTIVE,
+    }).select('+passwordHash');
+    if (!user) throw unauthorized('Kiosk operator not found');
+    user.passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+    await user.save();
+
+    const secret = generateSecret();
+    const setupToken = setSetupSession(user._id.toString(), secret);
+    const accountName = user.email || `operator-${user._id.toString()}`;
+    const qrCodeUrl = buildOtpAuthUrl({ secret, accountName });
+    res.json({ setupToken, secret, qrCodeUrl });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /auth/kiosk/2fa/enroll
+ * Body: { setupToken, code }.
+ */
+const kioskEnroll2FA = async (req, res, next) => {
+  try {
+    const { setupToken, code } = req.body;
+    const setup = getSetupSession(setupToken);
+    if (!setup) throw unauthorized('Setup token is invalid or expired');
+    if (!verifyCode(setup.secret, code)) throw badRequest('Invalid 2FA code');
+
+    const user = await User.findByIdAndUpdate(
+      setup.userId,
+      { twoFactorSecret: setup.secret, twoFactorEnabled: true },
+      { new: true }
+    );
+    if (!user) throw unauthorized('Kiosk operator not found');
+    clearSetupSession(setupToken);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /auth/kiosk/login
+ * Body: { operatorId, password }.
+ */
+const kioskLogin = async (req, res, next) => {
+  try {
+    const { operatorId, password } = req.body;
+    const user = await User.findOne({
+      _id: operatorId,
+      role: ROLES.KIOSK_OPERATOR,
+    }).select('+passwordHash +twoFactorSecret');
+    if (!user) throw unauthorized('Invalid operator or password');
+    if (user.status !== USER_STATUS.ACTIVE) throw unauthorized('Account is inactive');
+    const valid = await user.comparePassword(password);
+    if (!valid) throw unauthorized('Invalid operator or password');
+
+    if (user.twoFactorEnabled && user.twoFactorSecret) {
+      const tempToken = setTempSession(user._id.toString());
+      return res.json({ requires2FA: true, tempToken });
+    }
+
+    return res.json(createAccessPayload(user));
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /auth/2fa/verify
+ * Body: { tempToken, code }.
+ */
+const verify2FA = async (req, res, next) => {
+  try {
+    const { tempToken, code } = req.body;
+    const temp = consumeTempSession(tempToken);
+    if (!temp) throw unauthorized('2FA session expired');
+    const user = await User.findById(temp.userId).select('+twoFactorSecret');
+    if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+      throw unauthorized('2FA not enabled for this user');
+    }
+    if (!verifyCode(user.twoFactorSecret, code)) {
+      throw unauthorized('Invalid 2FA code');
+    }
+    return res.json(createAccessPayload(user));
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * POST /auth/refresh
  * Body: { refreshToken } or cookie (when USE_HTTPONLY_COOKIE).
  * Returns: { token (new access), refreshToken? (if rotated and not cookie) }
@@ -333,4 +479,18 @@ const otpVerify = async (req, res, next) => {
   }
 };
 
-module.exports = { login, refresh, logout, me, register, kioskRegister, otpSend, otpVerify };
+module.exports = {
+  login,
+  refresh,
+  logout,
+  me,
+  register,
+  kioskRegister,
+  otpSend,
+  otpVerify,
+  listKioskOperators,
+  kioskSetup,
+  kioskEnroll2FA,
+  kioskLogin,
+  verify2FA,
+};

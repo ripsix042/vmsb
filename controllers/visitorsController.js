@@ -124,6 +124,15 @@ async function updateVisitor(req, res, next) {
     const visit = await Visit.findById(req.params.id);
     if (!visit) throw notFound('Visitor not found');
     const updates = { ...req.body };
+    if (updates.checkedInByUserId === undefined) {
+      updates.checkedInByUserId = updates.checkedInBy ?? updates.checked_in_by;
+    }
+    if (updates.scheduledStart === undefined) {
+      updates.scheduledStart = updates.scheduled_start ?? updates.meetingStart ?? updates.scheduledTime;
+    }
+    if (updates.scheduledEnd === undefined) {
+      updates.scheduledEnd = updates.scheduled_end ?? updates.meetingEnd;
+    }
     if (updates.checkInTime !== undefined) updates.checkInTime = updates.checkInTime ? new Date(updates.checkInTime) : null;
     if (updates.checkOutTime !== undefined) updates.checkOutTime = updates.checkOutTime ? new Date(updates.checkOutTime) : null;
     if (updates.scheduledStart !== undefined) updates.scheduledStart = updates.scheduledStart ? new Date(updates.scheduledStart) : null;
