@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const RefreshToken = require('../models/RefreshToken');
 const { toFrontendRole } = require('../utils/roleMap');
 const { notFound, forbidden, conflict } = require('../utils/errors');
 const { ROLES, USER_STATUS } = require('../config/constants');
@@ -79,12 +80,19 @@ async function listHosts(req, res, next) {
 async function listStaff(req, res, next) {
   try {
     const users = await User.find().select('-passwordHash').lean();
+    const now = new Date();
+    const activeSessions = await RefreshToken.find({
+      revokedAt: null,
+      expiresAt: { $gt: now },
+    }).select('userId').lean();
+    const onlineUserIds = new Set(activeSessions.map((s) => s.userId.toString()));
     const profiles = users.map((u) => ({
       id: u._id.toString(),
       full_name: u.fullName,
       email: u.email,
       phone: u.phone || null,
       is_active: u.status === USER_STATUS.ACTIVE,
+      is_online: onlineUserIds.has(u._id.toString()),
     }));
     const roles = {};
     users.forEach((u) => {
@@ -117,10 +125,10 @@ async function createStaff(req, res, next) {
     const profile = userToProfile(user);
     const roles = { [user._id.toString()]: toFrontendRole(user.role) };
     logAuditFromReq(req, {
-      action: 'staff.create',
+      action: 'create_user',
       resourceType: 'User',
       resourceId: user._id.toString(),
-      metadata: { email: user.email, role: user.role },
+      metadata: { email: user.email, role: user.role, summary: `Added ${user.fullName}` },
     }).catch(() => {});
     res.status(201).json({ profile, roles });
   } catch (err) {
@@ -132,6 +140,8 @@ async function updateStaffRole(req, res, next) {
   try {
     const { userId } = req.params;
     const { role } = req.body;
+    const current = await User.findById(userId).select('role');
+    if (!current) throw notFound('User not found');
     const user = await User.findByIdAndUpdate(
       userId,
       { role },
@@ -139,10 +149,10 @@ async function updateStaffRole(req, res, next) {
     ).select('-passwordHash');
     if (!user) throw notFound('User not found');
     logAuditFromReq(req, {
-      action: 'staff.update_role',
+      action: 'update_role',
       resourceType: 'User',
       resourceId: userId,
-      metadata: { role },
+      metadata: { old_role: current.role, new_role: role, summary: `${current.role} → ${role}` },
     }).catch(() => {});
     res.json({ role: toFrontendRole(user.role) });
   } catch (err) {
@@ -162,10 +172,10 @@ async function updateStaffStatus(req, res, next) {
     ).select('-passwordHash');
     if (!user) throw notFound('User not found');
     logAuditFromReq(req, {
-      action: 'staff.update_status',
+      action: 'toggle_status',
       resourceType: 'User',
       resourceId: userId,
-      metadata: { isActive },
+      metadata: { new_status: isActive, summary: isActive ? 'Activated' : 'Deactivated' },
     }).catch(() => {});
     res.json({ is_active: user.status === USER_STATUS.ACTIVE });
   } catch (err) {
@@ -183,9 +193,10 @@ async function deleteStaff(req, res, next) {
     if (!user) throw notFound('User not found');
     await User.findByIdAndDelete(userId);
     logAuditFromReq(req, {
-      action: 'staff.delete',
+      action: 'delete_user',
       resourceType: 'User',
       resourceId: userId,
+      metadata: { email: user.email, summary: `Removed ${user.fullName}` },
     }).catch(() => {});
     res.status(204).send();
   } catch (err) {
