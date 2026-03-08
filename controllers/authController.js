@@ -285,6 +285,15 @@ const kioskSetup = async (req, res, next) => {
     const setupToken = setSetupSession(user._id.toString(), secret);
     const accountName = user.email || `operator-${user._id.toString()}`;
     const qrCodeUrl = buildOtpAuthUrl({ secret, accountName });
+    logAudit({
+      userId: user._id,
+      action: 'kiosk_setup',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: `Kiosk setup started for ${user.fullName}` },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
     res.json({ setupToken, secret, qrCodeUrl });
   } catch (err) {
     next(err);
@@ -309,6 +318,15 @@ const kioskEnroll2FA = async (req, res, next) => {
     );
     if (!user) throw unauthorized('Kiosk operator not found');
     clearSetupSession(setupToken);
+    logAudit({
+      userId: user._id,
+      action: 'kiosk_2fa_enroll',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: 'Kiosk 2FA enrolled' },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
     res.json({ success: true });
   } catch (err) {
     next(err);
@@ -333,9 +351,26 @@ const kioskLogin = async (req, res, next) => {
 
     if (user.twoFactorEnabled && user.twoFactorSecret) {
       const tempToken = setTempSession(user._id.toString());
+      logAudit({
+        userId: user._id,
+        action: 'kiosk_login_challenge',
+        resourceType: 'User',
+        resourceId: user._id.toString(),
+        metadata: { summary: 'Kiosk login awaiting 2FA' },
+        ipAddress: req.ip || req.connection?.remoteAddress,
+        userAgent: req.get('user-agent'),
+      }).catch(() => {});
       return res.json({ requires2FA: true, tempToken });
     }
-
+    logAudit({
+      userId: user._id,
+      action: 'kiosk_login',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: 'Kiosk login successful' },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
     return res.json(createAccessPayload(user));
   } catch (err) {
     next(err);
@@ -358,6 +393,15 @@ const verify2FA = async (req, res, next) => {
     if (!verifyCode(user.twoFactorSecret, code)) {
       throw unauthorized('Invalid 2FA code');
     }
+    logAudit({
+      userId: user._id,
+      action: 'kiosk_2fa_verify',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: 'Kiosk 2FA verified' },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
     return res.json(createAccessPayload(user));
   } catch (err) {
     next(err);

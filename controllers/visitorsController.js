@@ -7,6 +7,7 @@ const { notFound, conflict } = require('../utils/errors');
 const { VISIT_STATUS, VISIT_TYPE } = require('../config/constants');
 const { ROLES } = require('../config/constants');
 const { emitToUser } = require('../services/socket');
+const { logAuditFromReq } = require('../services/auditLog');
 
 async function visitToApiVisitor(visit) {
   const v = visit.toObject ? visit.toObject() : visit;
@@ -113,6 +114,12 @@ async function createVisitor(req, res, next) {
       body: `${visitorName} from ${visitorCompany} has been pre-registered for your meeting.`,
       relatedVisitId: visit._id,
     });
+    logAuditFromReq(req, {
+      action: 'visitor_created',
+      resourceType: 'Visit',
+      resourceId: visit._id.toString(),
+      metadata: { visitor_name: visitorName, summary: `Registered ${visitorName}` },
+    }).catch(() => {});
 
     const visitor = await visitToApiVisitor(visit);
     res.status(201).json(visitor);
@@ -184,6 +191,20 @@ async function updateVisitor(req, res, next) {
         relatedVisitId: visit._id,
       });
       emitToUser(visit.hostId.toString(), 'visit:checked-in', { visitId: visit._id.toString(), visitorName: visit.visitorName, company: visit.visitorCompany });
+      logAuditFromReq(req, {
+        action: 'visitor_check_in',
+        resourceType: 'Visit',
+        resourceId: visit._id.toString(),
+        metadata: { visitor_name: visit.visitorName, summary: `${visit.visitorName} checked in` },
+      }).catch(() => {});
+    }
+    if (isCheckout) {
+      logAuditFromReq(req, {
+        action: 'visitor_check_out',
+        resourceType: 'Visit',
+        resourceId: visit._id.toString(),
+        metadata: { visitor_name: visit.visitorName, summary: `${visit.visitorName} checked out` },
+      }).catch(() => {});
     }
 
     const visitor = await visitToApiVisitor(visit);
