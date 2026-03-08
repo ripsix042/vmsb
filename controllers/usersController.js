@@ -78,7 +78,7 @@ async function listHosts(req, res, next) {
 
 async function listStaff(req, res, next) {
   try {
-    const users = await User.find({ status: USER_STATUS.ACTIVE }).select('-passwordHash').lean();
+    const users = await User.find().select('-passwordHash').lean();
     const profiles = users.map((u) => ({
       id: u._id.toString(),
       full_name: u.fullName,
@@ -90,7 +90,11 @@ async function listStaff(req, res, next) {
     users.forEach((u) => {
       roles[u._id.toString()] = toFrontendRole(u.role);
     });
-    res.json({ profiles, roles });
+    const roles_pascal = {};
+    users.forEach((u) => {
+      roles_pascal[u._id.toString()] = u.role;
+    });
+    res.json({ profiles, roles, roles_pascal });
   } catch (err) {
     next(err);
   }

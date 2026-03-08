@@ -3,7 +3,7 @@ const Visit = require('../models/Visit');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { generateVisitId, generateQrToken } = require('../utils/visitId');
-const { notFound } = require('../utils/errors');
+const { notFound, conflict } = require('../utils/errors');
 const { VISIT_STATUS, VISIT_TYPE } = require('../config/constants');
 const { ROLES } = require('../config/constants');
 const { emitToUser } = require('../services/socket');
@@ -40,6 +40,8 @@ async function visitToApiVisitor(visit) {
     checked_in_by: v.checkedInByUserId ? v.checkedInByUserId.toString() : null,
     checked_in_by_name: checkedInByName,
     qr_token: v.qr_token || null,
+    qr_used: !!v.qr_used,
+    qr_used_at: v.qr_used_at || null,
     created_at: v.createdAt,
     updated_at: v.updatedAt,
   };
@@ -143,10 +145,32 @@ async function updateVisitor(req, res, next) {
     const wasOnSite = visit.status === VISIT_STATUS.ON_SITE;
     const newStatus = updates.status || visit.status;
     const isCheckIn = newStatus === VISIT_STATUS.ON_SITE && !wasOnSite;
+    const isCheckout = newStatus === VISIT_STATUS.CHECKED_OUT;
+
+    if (isCheckIn) {
+      if (visit.status === VISIT_STATUS.ON_SITE) {
+        throw conflict('Visitor already checked in');
+      }
+      if (visit.status === VISIT_STATUS.CHECKED_OUT || visit.qr_used) {
+        throw conflict('Code is no longer valid');
+      }
+    }
+
+    if (isCheckout) {
+      if (visit.status === VISIT_STATUS.CHECKED_OUT) {
+        throw conflict('Visitor already checked out');
+      }
+      if (visit.status !== VISIT_STATUS.ON_SITE) {
+        throw conflict('Visitor must be checked in before checkout');
+      }
+      updates.qr_used = true;
+      updates.qr_used_at = new Date();
+      updates.qr_token = null;
+    }
 
     if (isCheckIn && !updates.checkInTime) updates.checkInTime = new Date();
     if (isCheckIn && !updates.checkedInByUserId) updates.checkedInByUserId = req.user._id;
-    if (newStatus === VISIT_STATUS.CHECKED_OUT && !updates.checkOutTime) updates.checkOutTime = new Date();
+    if (isCheckout && !updates.checkOutTime) updates.checkOutTime = new Date();
 
     Object.assign(visit, updates);
     await visit.save();
@@ -176,6 +200,9 @@ async function lookupVisitor(req, res, next) {
     const filter = visitId ? { visit_id: visitId } : { qr_token: qrToken };
     const visit = await Visit.findOne(filter);
     if (!visit) throw notFound('Visitor not found');
+    if (visit.status === VISIT_STATUS.CHECKED_OUT || visit.qr_used) {
+      throw notFound('Code is no longer valid');
+    }
     const visitor = await visitToApiVisitor(visit);
     res.json(visitor);
   } catch (err) {
