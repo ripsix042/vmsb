@@ -242,14 +242,22 @@ const kioskRegister = async (req, res, next) => {
  */
 const listKioskOperators = async (req, res, next) => {
   try {
+    const setupCompleteOnly = String(req.query.setup_complete || '').toLowerCase() === 'true';
     const users = await User.find({
       role: ROLES.KIOSK_OPERATOR,
       status: USER_STATUS.ACTIVE,
     })
-      .select('fullName')
+      .select('fullName twoFactorEnabled')
       .lean();
+    const operators = users.map((u) => ({
+      id: u._id.toString(),
+      fullName: u.fullName,
+      has_setup_complete: !!u.twoFactorEnabled,
+    }));
     res.json({
-      operators: users.map((u) => ({ id: u._id.toString(), fullName: u.fullName })),
+      operators: setupCompleteOnly
+        ? operators.filter((o) => o.has_setup_complete)
+        : operators,
     });
   } catch (err) {
     next(err);
