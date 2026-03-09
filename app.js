@@ -19,7 +19,16 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
-if (isProduction) app.set('trust proxy', 1);
+const trustProxyEnv = process.env.TRUST_PROXY;
+if (trustProxyEnv === 'true') {
+  app.set('trust proxy', 1);
+} else if (trustProxyEnv === 'false') {
+  app.set('trust proxy', false);
+} else if (trustProxyEnv && !Number.isNaN(Number(trustProxyEnv))) {
+  app.set('trust proxy', Number(trustProxyEnv));
+} else if (isProduction) {
+  app.set('trust proxy', 1);
+}
 app.use(cookieParser());
 
 const corsOrigin = getCorsOrigin();
