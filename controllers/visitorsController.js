@@ -20,6 +20,7 @@ async function visitToApiVisitor(visit) {
   if (v.checkedInByUserId) {
     const op = await User.findById(v.checkedInByUserId).select('fullName').lean();
     if (op) checkedInByName = op.fullName;
+    else checkedInByName = 'Former Staff';
   }
   return {
     id: v._id.toString(),
