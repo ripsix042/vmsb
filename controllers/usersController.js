@@ -49,8 +49,17 @@ async function updateMe(req, res, next) {
 async function getProfileById(req, res, next) {
   try {
     const user = await User.findById(req.params.userId).select('-passwordHash');
-    if (!user) throw notFound('User not found');
-    res.json(userToProfile(user));
+    if (!user) {
+      // Keep historical references renderable (e.g. checked_in_by on old visits).
+      return res.json({
+        id: req.params.userId,
+        full_name: 'Former Staff',
+        email: null,
+        phone: null,
+        is_active: false,
+      });
+    }
+    return res.json(userToProfile(user));
   } catch (err) {
     next(err);
   }
