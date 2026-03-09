@@ -114,12 +114,13 @@ async function createStaff(req, res, next) {
     const existing = await User.findOne({ email }).select('_id');
     if (existing) throw conflict('A user with this email already exists');
     const passwordHash = await bcrypt.hash('ChangeMe123!', PASSWORD.BCRYPT_ROUNDS);
+    const status = role === ROLES.KIOSK_OPERATOR ? USER_STATUS.INACTIVE : USER_STATUS.ACTIVE;
     const user = await User.create({
       fullName,
       email,
       passwordHash,
       role,
-      status: USER_STATUS.ACTIVE,
+      status,
       phone: phone || null,
     });
     const profile = userToProfile(user);
