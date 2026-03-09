@@ -45,10 +45,14 @@ const updateVisitorSchema = Joi.object({
   meetingEnd: Joi.date().iso().allow(null),
   scheduledTime: Joi.date().iso().allow(null),
   checkInTime: Joi.date().iso().allow(null),
+  check_in_time: Joi.date().iso().allow(null),
   checkOutTime: Joi.date().iso().allow(null),
+  check_out_time: Joi.date().iso().allow(null),
   checkedInByUserId: Joi.string().allow(null, ''),
   checkedInBy: Joi.string().allow(null, ''),
   checked_in_by: Joi.string().allow(null, ''),
+  signed_nda: Joi.boolean(),
+  qr_used: Joi.boolean(),
 }).min(1);
 
 module.exports = { createVisitorSchema, updateVisitorSchema };

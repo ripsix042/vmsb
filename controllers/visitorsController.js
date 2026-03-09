@@ -142,6 +142,12 @@ async function updateVisitor(req, res, next) {
     if (updates.scheduledEnd === undefined) {
       updates.scheduledEnd = updates.scheduled_end ?? updates.meetingEnd;
     }
+    if (updates.checkInTime === undefined) {
+      updates.checkInTime = updates.check_in_time;
+    }
+    if (updates.checkOutTime === undefined) {
+      updates.checkOutTime = updates.check_out_time;
+    }
     if (updates.checkInTime !== undefined) updates.checkInTime = updates.checkInTime ? new Date(updates.checkInTime) : null;
     if (updates.checkOutTime !== undefined) updates.checkOutTime = updates.checkOutTime ? new Date(updates.checkOutTime) : null;
     if (updates.scheduledStart !== undefined) updates.scheduledStart = updates.scheduledStart ? new Date(updates.scheduledStart) : null;

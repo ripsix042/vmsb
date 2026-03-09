@@ -63,6 +63,23 @@ function createAccessPayload(user) {
   };
 }
 
+async function attachRefreshToPayload(payload, user, req, res) {
+  const refreshToken = generateRefreshToken();
+  const refreshExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await RefreshToken.create({
+    userId: user._id,
+    tokenHash: hashToken(refreshToken),
+    expiresAt: refreshExpires,
+    userAgent: req.get('user-agent') || null,
+  });
+  if (USE_HTTPONLY_COOKIE) {
+    setRefreshCookie(res, refreshToken);
+  } else {
+    payload.refreshToken = refreshToken;
+  }
+  return payload;
+}
+
 /**
  * POST /auth/login
  * Returns: { token (access), refreshToken? (if not httpOnly), user }
@@ -245,7 +262,6 @@ const listKioskOperators = async (req, res, next) => {
     const setupCompleteOnly = String(req.query.setup_complete || '').toLowerCase() === 'true';
     const users = await User.find({
       role: ROLES.KIOSK_OPERATOR,
-      status: USER_STATUS.ACTIVE,
     })
       .select('fullName twoFactorEnabled')
       .lean();
@@ -275,7 +291,6 @@ const kioskSetup = async (req, res, next) => {
     const user = await User.findOne({
       _id: operatorId,
       role: ROLES.KIOSK_OPERATOR,
-      status: USER_STATUS.ACTIVE,
     }).select('+passwordHash');
     if (!user) throw unauthorized('Kiosk operator not found');
     user.passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
@@ -313,7 +328,7 @@ const kioskEnroll2FA = async (req, res, next) => {
 
     const user = await User.findByIdAndUpdate(
       setup.userId,
-      { twoFactorSecret: setup.secret, twoFactorEnabled: true },
+      { twoFactorSecret: setup.secret, twoFactorEnabled: true, status: USER_STATUS.ACTIVE },
       { new: true }
     );
     if (!user) throw unauthorized('Kiosk operator not found');
@@ -371,7 +386,9 @@ const kioskLogin = async (req, res, next) => {
       ipAddress: req.ip || req.connection?.remoteAddress,
       userAgent: req.get('user-agent'),
     }).catch(() => {});
-    return res.json(createAccessPayload(user));
+    const payload = createAccessPayload(user);
+    await attachRefreshToPayload(payload, user, req, res);
+    return res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -402,7 +419,9 @@ const verify2FA = async (req, res, next) => {
       ipAddress: req.ip || req.connection?.remoteAddress,
       userAgent: req.get('user-agent'),
     }).catch(() => {});
-    return res.json(createAccessPayload(user));
+    const payload = createAccessPayload(user);
+    await attachRefreshToPayload(payload, user, req, res);
+    return res.json(payload);
   } catch (err) {
     next(err);
   }
