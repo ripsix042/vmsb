@@ -502,6 +502,12 @@ const logout = async (req, res, next) => {
         await RefreshToken.updateOne({ _id: doc._id }, { revokedAt: new Date() });
         logLogout(req, doc.userId);
       }
+    } else if (req.user?._id) {
+      await RefreshToken.updateMany(
+        { userId: req.user._id, revokedAt: null },
+        { revokedAt: new Date() }
+      );
+      logLogout(req, req.user._id);
     }
     if (USE_HTTPONLY_COOKIE) clearRefreshCookie(res);
     res.status(204).send();

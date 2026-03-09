@@ -68,6 +68,6 @@ router.post('/kiosk/register', validate(kioskRegisterSchema), kioskRegister);
 router.post('/otp/send', otpLimiter, validate(otpSendSchema), otpSend);
 router.post('/otp/verify', otpLimiter, validate(otpVerifySchema), otpVerify);
 router.post('/refresh', refreshLimiter, refresh);
-router.post('/logout', logout);
+router.post('/logout', authenticate, logout);
 
 module.exports = router;
