@@ -24,8 +24,9 @@ function attachSocket(httpServer) {
     }
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.userId).select('_id').lean();
+      const user = await User.findById(decoded.userId).select('_id status').lean();
       if (!user) return next(new Error('User not found'));
+      if (user.status !== 'Active') return next(new Error('Account inactive'));
       socket.userId = user._id.toString();
       next();
     } catch (err) {
@@ -61,4 +62,10 @@ function emitToUser(userId, event, payload) {
   }
 }
 
-module.exports = { attachSocket, getIO, emitToUser };
+function emitGlobal(event, payload) {
+  if (io) {
+    io.emit(event, payload);
+  }
+}
+
+module.exports = { attachSocket, getIO, emitToUser, emitGlobal };

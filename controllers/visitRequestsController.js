@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const Visit = require('../models/Visit');
 const Notification = require('../models/Notification');
 const { generateVisitId } = require('../utils/visitId');
-const { notFound, forbidden } = require('../utils/errors');
+const { notFound, forbidden, badRequest } = require('../utils/errors');
 const { VISIT_TYPE, VISIT_STATUS } = require('../config/constants');
 const { ROLES } = require('../config/constants');
 const { emitToUser } = require('../services/socket');
@@ -26,6 +26,7 @@ function visitToApiRequest(visit) {
 async function createVisitRequest(req, res, next) {
   try {
     const { name, email, company, phone, reason, notes, host_id } = req.body;
+    if (!mongoose.isValidObjectId(host_id)) throw badRequest('Invalid host_id');
     const hostId = new mongoose.Types.ObjectId(host_id);
     const visitId = generateVisitId();
     const visit = await Visit.create({
