@@ -1,8 +1,9 @@
 const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const RefreshToken = require('../models/RefreshToken');
 const { toFrontendRole } = require('../utils/roleMap');
-const { notFound, forbidden, conflict } = require('../utils/errors');
+const { notFound, forbidden, conflict, badRequest } = require('../utils/errors');
 const { ROLES, USER_STATUS } = require('../config/constants');
 const { PASSWORD } = require('../config/security');
 const { logAuditFromReq } = require('../services/auditLog');
@@ -48,6 +49,7 @@ async function updateMe(req, res, next) {
 
 async function getProfileById(req, res, next) {
   try {
+    if (!mongoose.isValidObjectId(req.params.userId)) throw badRequest('Invalid userId');
     const user = await User.findById(req.params.userId).select('-passwordHash');
     if (!user) {
       // Keep historical references renderable (e.g. checked_in_by on old visits).
@@ -119,10 +121,11 @@ async function listStaff(req, res, next) {
 
 async function createStaff(req, res, next) {
   try {
-    const { email, fullName, role, phone } = req.body;
+    const { email, fullName, role, phone, password } = req.body;
     const existing = await User.findOne({ email }).select('_id');
     if (existing) throw conflict('A user with this email already exists');
-    const passwordHash = await bcrypt.hash('ChangeMe123!', PASSWORD.BCRYPT_ROUNDS);
+    const initialPassword = (password && String(password).trim()) || 'ChangeMe123!';
+    const passwordHash = await bcrypt.hash(initialPassword, PASSWORD.BCRYPT_ROUNDS);
     const status = role === ROLES.KIOSK_OPERATOR ? USER_STATUS.INACTIVE : USER_STATUS.ACTIVE;
     const user = await User.create({
       fullName,
@@ -149,6 +152,7 @@ async function createStaff(req, res, next) {
 async function updateStaffRole(req, res, next) {
   try {
     const { userId } = req.params;
+    if (!mongoose.isValidObjectId(userId)) throw badRequest('Invalid userId');
     const { role } = req.body;
     const current = await User.findById(userId).select('role');
     if (!current) throw notFound('User not found');
@@ -173,6 +177,7 @@ async function updateStaffRole(req, res, next) {
 async function updateStaffStatus(req, res, next) {
   try {
     const { userId } = req.params;
+    if (!mongoose.isValidObjectId(userId)) throw badRequest('Invalid userId');
     const { isActive } = req.body;
     const status = isActive ? USER_STATUS.ACTIVE : USER_STATUS.INACTIVE;
     const user = await User.findByIdAndUpdate(
@@ -196,6 +201,7 @@ async function updateStaffStatus(req, res, next) {
 async function deleteStaff(req, res, next) {
   try {
     const { userId } = req.params;
+    if (!mongoose.isValidObjectId(userId)) throw badRequest('Invalid userId');
     if (userId === req.user._id.toString()) {
       throw forbidden('You cannot delete your own account');
     }

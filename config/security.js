@@ -48,7 +48,7 @@ const RATE_LIMITS = {
   refresh: { windowMs: 15 * 60 * 1000, max: 20 },
   otp: { windowMs: 15 * 60 * 1000, max: isProduction ? 3 : 10 },
   public: { windowMs: 1 * 60 * 1000, max: 60 },
-  api: { windowMs: 15 * 60 * 1000, max: 200 },
+  api: { windowMs: 15 * 60 * 1000, max: isProduction ? 200 : 2000 },
 };
 
 /** Weak/default secrets that must not be used in production. */

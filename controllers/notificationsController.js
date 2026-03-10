@@ -1,5 +1,6 @@
 const Notification = require('../models/Notification');
-const { notFound } = require('../utils/errors');
+const { notFound, forbidden, badRequest } = require('../utils/errors');
+const { ROLES } = require('../config/constants');
 
 function notificationToApi(n) {
   const doc = n.toObject ? n.toObject() : n;
@@ -20,7 +21,12 @@ function notificationToApi(n) {
 async function listNotifications(req, res, next) {
   try {
     const { hostId } = req.query;
-    const userId = hostId ? hostId : req.user._id.toString();
+    const isAdmin = req.user.role === ROLES.ADMIN;
+    let userId = req.user._id.toString();
+    if (hostId) {
+      if (!isAdmin) throw forbidden('Only admins can query notifications by hostId');
+      userId = hostId.toString();
+    }
     const notifications = await Notification.find({ userId })
       .sort({ createdAt: -1 })
       .lean();
@@ -34,8 +40,17 @@ async function listNotifications(req, res, next) {
 async function createNotification(req, res, next) {
   try {
     const { type, message, title, body, visitor_id, host_id, read } = req.body;
+    const isAdmin = req.user.role === ROLES.ADMIN;
+    const requesterId = req.user._id.toString();
+    const targetUserId = host_id || requesterId;
+    if (!isAdmin && targetUserId !== requesterId) {
+      throw forbidden('You can only create notifications for your own account');
+    }
+    if (visitor_id && typeof visitor_id !== 'string') {
+      throw badRequest('Invalid visitor_id');
+    }
     const doc = await Notification.create({
-      userId: host_id,
+      userId: targetUserId,
       type,
       title: title || '',
       body: body || message || '',

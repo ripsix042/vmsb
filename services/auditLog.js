@@ -1,4 +1,5 @@
 const AuditLog = require('../models/AuditLog');
+const { emitGlobal } = require('./socket');
 
 /**
  * Write an audit log entry. Call from controllers after sensitive actions.
@@ -21,7 +22,7 @@ async function logAudit(options) {
     ipAddress = null,
     userAgent = null,
   } = options;
-  await AuditLog.create({
+  const doc = await AuditLog.create({
     userId,
     action,
     resourceType,
@@ -29,6 +30,13 @@ async function logAudit(options) {
     metadata,
     ipAddress,
     userAgent,
+  });
+  emitGlobal('audit_log_new', {
+    id: doc._id.toString(),
+    action: doc.action,
+    resource_type: doc.resourceType,
+    resource_id: doc.resourceId,
+    created_at: doc.createdAt,
   });
 }
 

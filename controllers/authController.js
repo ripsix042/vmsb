@@ -129,6 +129,10 @@ const login = async (req, res, next) => {
     logAudit({
       userId: user._id,
       action: 'login',
+      metadata: {
+        role: toFrontendRole(user.role),
+        summary: `Signed in as ${toFrontendRole(user.role)}`,
+      },
       ipAddress: req.ip || req.connection?.remoteAddress,
       userAgent: req.get('user-agent'),
     }).catch(() => {});
@@ -298,8 +302,8 @@ const kioskSetup = async (req, res, next) => {
 
     const secret = generateSecret();
     const setupToken = setSetupSession(user._id.toString(), secret);
-    const accountName = user.email || `operator-${user._id.toString()}`;
-    const qrCodeUrl = buildOtpAuthUrl({ secret, accountName });
+    const accountName = 'Kiosk Operator';
+    const qrCodeUrl = buildOtpAuthUrl({ secret, accountName, issuer: 'Kora VMS' });
     logAudit({
       userId: user._id,
       action: 'kiosk_setup',
@@ -382,7 +386,10 @@ const kioskLogin = async (req, res, next) => {
       action: 'kiosk_login',
       resourceType: 'User',
       resourceId: user._id.toString(),
-      metadata: { summary: 'Kiosk login successful' },
+      metadata: {
+        role: toFrontendRole(user.role),
+        summary: `Signed in as ${toFrontendRole(user.role)}`,
+      },
       ipAddress: req.ip || req.connection?.remoteAddress,
       userAgent: req.get('user-agent'),
     }).catch(() => {});
@@ -415,7 +422,10 @@ const verify2FA = async (req, res, next) => {
       action: 'kiosk_2fa_verify',
       resourceType: 'User',
       resourceId: user._id.toString(),
-      metadata: { summary: 'Kiosk 2FA verified' },
+      metadata: {
+        role: toFrontendRole(user.role),
+        summary: `2FA verified as ${toFrontendRole(user.role)}`,
+      },
       ipAddress: req.ip || req.connection?.remoteAddress,
       userAgent: req.get('user-agent'),
     }).catch(() => {});

@@ -27,7 +27,7 @@ if (!uri.startsWith('mongodb+srv://') && !uri.startsWith('mongodb://')) {
   console.error('MONGODB_URI should start with mongodb+srv:// or mongodb://. Got:', uri.substring(0, 50) + '...');
   process.exit(1);
 }
-if (uri.includes('localhost') || uri.includes('127.0.0.1')) {
+if (process.env.NODE_ENV === 'production' && (uri.includes('localhost') || uri.includes('127.0.0.1'))) {
   console.error('MONGODB_URI is set to localhost. Use an Atlas connection string in production.');
   process.exit(1);
 }

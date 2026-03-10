@@ -17,17 +17,23 @@ const createVisitorSchema = Joi.object({
   visitType: Joi.string().valid(...Object.values(VISIT_TYPE)),
   status: Joi.string().valid(...Object.values(VISIT_STATUS)),
   scheduledStart: Joi.date().iso(),
+  scheduled_start: Joi.date().iso(),
   scheduledEnd: Joi.date().iso(),
+  scheduled_end: Joi.date().iso(),
   meetingStart: Joi.date().iso(),
+  meeting_start: Joi.date().iso(),
   meetingEnd: Joi.date().iso(),
+  meeting_end: Joi.date().iso(),
   scheduledTime: Joi.date().iso(),
+  scheduled_time: Joi.date().iso(),
   visit_id: Joi.string().max(20),
   qr_token: Joi.string().max(100),
 })
   .min(1)
   .or('name', 'visitorName')
   .or('email', 'visitorEmail')
-  .or('company', 'visitorCompany');
+  .or('company', 'visitorCompany')
+  .or('scheduledStart', 'scheduled_start', 'meetingStart', 'meeting_start', 'scheduledTime', 'scheduled_time');
 
 const updateVisitorSchema = Joi.object({
   visitorName: Joi.string().min(1).max(200).trim(),

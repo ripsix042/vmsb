@@ -15,6 +15,7 @@ const createStaffSchema = Joi.object({
     .normalize()
     .lowercase(),
   fullName: Joi.string().required().min(2).max(100).trim(),
+  password: Joi.string().min(PASSWORD.MIN_LENGTH).max(PASSWORD.MAX_LENGTH),
   role: Joi.string()
     .required()
     .valid(ROLES.ADMIN, ROLES.EMPLOYEE, ROLES.KIOSK_OPERATOR),

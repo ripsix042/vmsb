@@ -3,11 +3,52 @@ const Visit = require('../models/Visit');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { generateVisitId, generateQrToken } = require('../utils/visitId');
-const { notFound, conflict } = require('../utils/errors');
+const { notFound, conflict, forbidden, badRequest } = require('../utils/errors');
 const { VISIT_STATUS, VISIT_TYPE } = require('../config/constants');
 const { ROLES } = require('../config/constants');
-const { emitToUser } = require('../services/socket');
+const { emitToUser, emitGlobal } = require('../services/socket');
 const { logAuditFromReq } = require('../services/auditLog');
+
+// Include legacy status values so older records still auto-expire.
+const EXPIRABLE_STATUSES = [
+  VISIT_STATUS.SCHEDULED,
+  VISIT_STATUS.PENDING_APPROVAL,
+  VISIT_STATUS.APPROVED,
+  'expected',
+  'pending',
+  'confirmed',
+];
+
+function shouldExpireVisit(visitLike) {
+  if (!visitLike) return false;
+  if (!EXPIRABLE_STATUSES.includes(visitLike.status)) return false;
+  if (visitLike.checkInTime) return false;
+  const expiryTime = visitLike.scheduledEnd || visitLike.scheduledStart;
+  if (!expiryTime) return false;
+  return new Date(expiryTime).getTime() <= Date.now();
+}
+
+function buildDueExpiryFilter(baseFilter = {}) {
+  const now = new Date();
+  return {
+    ...baseFilter,
+    status: { $in: EXPIRABLE_STATUSES },
+    checkInTime: null,
+    $or: [
+      { scheduledEnd: { $ne: null, $lte: now } },
+      { scheduledEnd: null, scheduledStart: { $ne: null, $lte: now } },
+    ],
+  };
+}
+
+async function expireDueVisits(baseFilter = {}) {
+  const update = {
+    status: VISIT_STATUS.EXPIRED,
+    qr_used: true,
+    qr_used_at: new Date(),
+  };
+  return Visit.updateMany(buildDueExpiryFilter(baseFilter), { $set: update, $unset: { qr_token: 1 } });
+}
 
 async function visitToApiVisitor(visit) {
   const v = visit.toObject ? visit.toObject() : visit;
@@ -55,8 +96,21 @@ async function listVisitors(req, res, next) {
     const isAdmin = req.user.role === ROLES.ADMIN;
     const isKiosk = req.user.role === ROLES.KIOSK_OPERATOR;
     let filter = {};
-    if (hostId) filter.hostId = new mongoose.Types.ObjectId(hostId);
-    else if (!isAdmin && !isKiosk) filter.hostId = req.user._id;
+    if (hostId) {
+      if (!mongoose.isValidObjectId(hostId)) throw badRequest('Invalid hostId');
+      const requestedHostId = hostId.toString();
+      const ownId = req.user._id.toString();
+      if (!isAdmin && requestedHostId !== ownId) {
+        throw forbidden('You can only view your own visitors');
+      }
+      filter.hostId = new mongoose.Types.ObjectId(requestedHostId);
+    } else if (!isAdmin && !isKiosk) {
+      filter.hostId = req.user._id;
+    }
+    const expireResult = await expireDueVisits(filter);
+    if ((expireResult?.modifiedCount || 0) > 0) {
+      emitGlobal('visitor_updated', { action: 'expired_bulk' });
+    }
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const skip = (page - 1) * limit;
@@ -76,6 +130,7 @@ async function listVisitors(req, res, next) {
 async function createVisitor(req, res, next) {
   try {
     const body = req.body;
+    if (!mongoose.isValidObjectId(body.hostId)) throw badRequest('Invalid hostId');
     const hostId = new mongoose.Types.ObjectId(body.hostId);
     const visitorName = body.visitorName || body.name;
     const visitorEmail = body.visitorEmail || body.email;
@@ -85,10 +140,31 @@ async function createVisitor(req, res, next) {
     const additionalNotes = body.additionalNotes ?? body.notes ?? null;
     const visitType = body.visitType || VISIT_TYPE.PRE_REGISTERED;
     const status = body.status || VISIT_STATUS.SCHEDULED;
-    const rawStart = body.scheduledStart || body.meetingStart || body.scheduledTime;
-    const rawEnd = body.scheduledEnd || body.meetingEnd;
-    const scheduledStart = rawStart ? new Date(rawStart) : null;
+    // Accept both camelCase and snake_case scheduling fields from clients.
+    const rawStart =
+      body.scheduledStart ||
+      body.meetingStart ||
+      body.scheduledTime ||
+      body.scheduled_start ||
+      body.meeting_start ||
+      body.scheduled_time;
+    const rawEnd =
+      body.scheduledEnd ||
+      body.meetingEnd ||
+      body.scheduled_end ||
+      body.meeting_end;
+    if (!rawStart) throw badRequest('scheduledStart is required');
+    const scheduledStart = new Date(rawStart);
+    if (Number.isNaN(scheduledStart.getTime())) {
+      throw badRequest('Invalid scheduledStart date');
+    }
     const scheduledEnd = rawEnd ? new Date(rawEnd) : null;
+    if (scheduledEnd && Number.isNaN(scheduledEnd.getTime())) {
+      throw badRequest('Invalid scheduledEnd date');
+    }
+    if (scheduledEnd && scheduledEnd.getTime() < scheduledStart.getTime()) {
+      throw badRequest('scheduledEnd must be after scheduledStart');
+    }
     const visit_id = body.visit_id || generateVisitId();
     const qr_token = body.qr_token || generateQrToken();
 
@@ -123,6 +199,12 @@ async function createVisitor(req, res, next) {
     }).catch(() => {});
 
     const visitor = await visitToApiVisitor(visit);
+    emitGlobal('visitor_updated', {
+      id: visit._id.toString(),
+      status: visit.status,
+      host_id: visit.hostId.toString(),
+      action: 'created',
+    });
     res.status(201).json(visitor);
   } catch (err) {
     next(err);
@@ -131,9 +213,31 @@ async function createVisitor(req, res, next) {
 
 async function updateVisitor(req, res, next) {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) throw badRequest('Invalid visitor id');
     const visit = await Visit.findById(req.params.id);
     if (!visit) throw notFound('Visitor not found');
+    const isAdmin = req.user.role === ROLES.ADMIN;
+    const isKiosk = req.user.role === ROLES.KIOSK_OPERATOR;
+    const isHost = visit.hostId.toString() === req.user._id.toString();
+    if (!isAdmin && !isKiosk && !isHost) {
+      throw forbidden('You do not have permission to update this visitor');
+    }
     const updates = { ...req.body };
+    if (isKiosk) {
+      const kioskAllowed = new Set([
+        'status',
+        'checkInTime',
+        'check_in_time',
+        'checkOutTime',
+        'check_out_time',
+        'checkedInByUserId',
+        'checkedInBy',
+        'checked_in_by',
+      ]);
+      Object.keys(updates).forEach((key) => {
+        if (!kioskAllowed.has(key)) delete updates[key];
+      });
+    }
     if (updates.checkedInByUserId === undefined) {
       updates.checkedInByUserId = updates.checkedInBy ?? updates.checked_in_by;
     }
@@ -143,10 +247,10 @@ async function updateVisitor(req, res, next) {
     if (updates.scheduledEnd === undefined) {
       updates.scheduledEnd = updates.scheduled_end ?? updates.meetingEnd;
     }
-    if (updates.checkInTime === undefined) {
+    if (updates.checkInTime === undefined && updates.check_in_time !== undefined) {
       updates.checkInTime = updates.check_in_time;
     }
-    if (updates.checkOutTime === undefined) {
+    if (updates.checkOutTime === undefined && updates.check_out_time !== undefined) {
       updates.checkOutTime = updates.check_out_time;
     }
     if (updates.checkInTime !== undefined) updates.checkInTime = updates.checkInTime ? new Date(updates.checkInTime) : null;
@@ -154,7 +258,12 @@ async function updateVisitor(req, res, next) {
     if (updates.scheduledStart !== undefined) updates.scheduledStart = updates.scheduledStart ? new Date(updates.scheduledStart) : null;
     if (updates.scheduledEnd !== undefined) updates.scheduledEnd = updates.scheduledEnd ? new Date(updates.scheduledEnd) : null;
     if (updates.checkedInByUserId === '') updates.checkedInByUserId = null;
-    else if (updates.checkedInByUserId) updates.checkedInByUserId = new mongoose.Types.ObjectId(updates.checkedInByUserId);
+    else if (updates.checkedInByUserId) {
+      if (!mongoose.isValidObjectId(updates.checkedInByUserId)) {
+        throw badRequest('Invalid checkedInByUserId');
+      }
+      updates.checkedInByUserId = new mongoose.Types.ObjectId(updates.checkedInByUserId);
+    }
 
     const wasOnSite = visit.status === VISIT_STATUS.ON_SITE;
     const newStatus = updates.status || visit.status;
@@ -164,6 +273,20 @@ async function updateVisitor(req, res, next) {
     if (isCheckIn) {
       if (visit.status === VISIT_STATUS.ON_SITE) {
         throw conflict('Visitor already checked in');
+      }
+      if (shouldExpireVisit(visit)) {
+        visit.status = VISIT_STATUS.EXPIRED;
+        visit.qr_used = true;
+        visit.qr_used_at = new Date();
+        visit.qr_token = undefined;
+        await visit.save();
+        emitGlobal('visitor_updated', {
+          id: visit._id.toString(),
+          status: visit.status,
+          host_id: visit.hostId.toString(),
+          action: 'expired',
+        });
+        throw conflict('Visit has expired. Code is no longer valid');
       }
       if (visit.status === VISIT_STATUS.CHECKED_OUT || visit.qr_used) {
         throw conflict('Code is no longer valid');
@@ -179,12 +302,18 @@ async function updateVisitor(req, res, next) {
       }
       updates.qr_used = true;
       updates.qr_used_at = new Date();
-      updates.qr_token = null;
+      // Remove qr_token from the document so unique index doesn't collide on null values.
+      updates.qr_token = undefined;
     }
 
     if (isCheckIn && !updates.checkInTime) updates.checkInTime = new Date();
     if (isCheckIn && !updates.checkedInByUserId) updates.checkedInByUserId = req.user._id;
     if (isCheckout && !updates.checkOutTime) updates.checkOutTime = new Date();
+
+    // Avoid clearing existing visit fields by accidentally assigning undefined values.
+    Object.keys(updates).forEach((key) => {
+      if (updates[key] === undefined) delete updates[key];
+    });
 
     Object.assign(visit, updates);
     await visit.save();
@@ -215,6 +344,12 @@ async function updateVisitor(req, res, next) {
     }
 
     const visitor = await visitToApiVisitor(visit);
+    emitGlobal('visitor_updated', {
+      id: visit._id.toString(),
+      status: visit.status,
+      host_id: visit.hostId.toString(),
+      action: isCheckout ? 'checked_out' : isCheckIn ? 'checked_in' : 'updated',
+    });
     res.json(visitor);
   } catch (err) {
     next(err);
@@ -228,6 +363,20 @@ async function lookupVisitor(req, res, next) {
     const filter = visitId ? { visit_id: visitId } : { qr_token: qrToken };
     const visit = await Visit.findOne(filter);
     if (!visit) throw notFound('Visitor not found');
+    if (shouldExpireVisit(visit)) {
+      visit.status = VISIT_STATUS.EXPIRED;
+      visit.qr_used = true;
+      visit.qr_used_at = new Date();
+      visit.qr_token = undefined;
+      await visit.save();
+      emitGlobal('visitor_updated', {
+        id: visit._id.toString(),
+        status: visit.status,
+        host_id: visit.hostId.toString(),
+        action: 'expired',
+      });
+      throw notFound('Code is no longer valid');
+    }
     if (visit.status === VISIT_STATUS.CHECKED_OUT || visit.qr_used) {
       throw notFound('Code is no longer valid');
     }
