@@ -41,11 +41,12 @@ async function createVisitRequest(req, res, next) {
       status: VISIT_STATUS.PENDING_APPROVAL,
       visit_id: visitId,
     });
+    const walkInCompanyPart = company ? ` from ${company}` : '';
     await Notification.create({
       userId: hostId,
       type: 'walk_in_request',
       title: 'Walk-in request',
-      body: `${name} from ${company} would like to visit.`,
+      body: `${name}${walkInCompanyPart} would like to visit.`,
       relatedVisitId: visit._id,
     });
     emitToUser(hostId.toString(), 'walk-in:request', { visitId: visit._id.toString(), visit: visitToApiRequest(visit) });

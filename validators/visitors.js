@@ -30,8 +30,7 @@ const createVisitorSchema = Joi.object({
   qr_token: Joi.string().max(100),
 })
   .min(1)
-  .or('name', 'visitorName')
-  .or('scheduledStart', 'scheduled_start', 'meetingStart', 'meeting_start', 'scheduledTime', 'scheduled_time');
+  .or('name', 'visitorName');
 
 const updateVisitorSchema = Joi.object({
   visitorName: Joi.string().min(1).max(200).trim(),
