@@ -4,8 +4,8 @@ const { VISIT_TYPE, VISIT_STATUS } = require('../config/constants');
 const visitSchema = new mongoose.Schema(
   {
     visitorName: { type: String, required: true, trim: true },
-    visitorEmail: { type: String, required: true, trim: true },
-    visitorCompany: { type: String, required: true, trim: true },
+    visitorEmail: { type: String, trim: true, default: '' },
+    visitorCompany: { type: String, trim: true, default: '' },
     visitorPhone: { type: String, trim: true, default: null },
     hostId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     reason: { type: String, required: true, trim: true },

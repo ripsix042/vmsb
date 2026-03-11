@@ -31,8 +31,6 @@ const createVisitorSchema = Joi.object({
 })
   .min(1)
   .or('name', 'visitorName')
-  .or('email', 'visitorEmail')
-  .or('company', 'visitorCompany')
   .or('scheduledStart', 'scheduled_start', 'meetingStart', 'meeting_start', 'scheduledTime', 'scheduled_time');
 
 const updateVisitorSchema = Joi.object({
