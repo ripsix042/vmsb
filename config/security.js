@@ -44,7 +44,7 @@ const COOKIE_OPTIONS = {
 
 /** Rate limits (per IP) – stricter on auth. */
 const RATE_LIMITS = {
-  login: { windowMs: 15 * 60 * 1000, max: isProduction ? 5 : 10 },
+  login: { windowMs: 15 * 60 * 1000, max: 50 },
   refresh: { windowMs: 15 * 60 * 1000, max: 20 },
   otp: { windowMs: 15 * 60 * 1000, max: isProduction ? 3 : 10 },
   public: { windowMs: 1 * 60 * 1000, max: 60 },

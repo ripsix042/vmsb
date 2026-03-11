@@ -151,7 +151,7 @@ async function createVisitor(req, res, next) {
     const additionalNotes = body.additionalNotes ?? body.notes ?? null;
     const visitType = body.visitType || VISIT_TYPE.PRE_REGISTERED;
     const status = body.status || VISIT_STATUS.SCHEDULED;
-    // Accept both camelCase and snake_case scheduling fields from clients.
+    // Accept both camelCase and snake_case scheduling fields from clients. Optional: if omitted, visit expires 8hrs after registration.
     const rawStart =
       body.scheduledStart ||
       body.meetingStart ||
@@ -164,17 +164,20 @@ async function createVisitor(req, res, next) {
       body.meetingEnd ||
       body.scheduled_end ||
       body.meeting_end;
-    if (!rawStart) throw badRequest('scheduledStart is required');
-    const scheduledStart = new Date(rawStart);
-    if (Number.isNaN(scheduledStart.getTime())) {
-      throw badRequest('Invalid scheduledStart date');
-    }
-    const scheduledEnd = rawEnd ? new Date(rawEnd) : null;
-    if (scheduledEnd && Number.isNaN(scheduledEnd.getTime())) {
-      throw badRequest('Invalid scheduledEnd date');
-    }
-    if (scheduledEnd && scheduledEnd.getTime() < scheduledStart.getTime()) {
-      throw badRequest('scheduledEnd must be after scheduledStart');
+    let scheduledStart = null;
+    let scheduledEnd = null;
+    if (rawStart) {
+      scheduledStart = new Date(rawStart);
+      if (Number.isNaN(scheduledStart.getTime())) {
+        throw badRequest('Invalid scheduledStart date');
+      }
+      scheduledEnd = rawEnd ? new Date(rawEnd) : null;
+      if (scheduledEnd && Number.isNaN(scheduledEnd.getTime())) {
+        throw badRequest('Invalid scheduledEnd date');
+      }
+      if (scheduledEnd && scheduledEnd.getTime() < scheduledStart.getTime()) {
+        throw badRequest('scheduledEnd must be after scheduledStart');
+      }
     }
     const visit_id = body.visit_id || generateVisitId();
     const qr_token = body.qr_token || generateQrToken();
@@ -195,11 +198,12 @@ async function createVisitor(req, res, next) {
       qr_token,
     });
 
+    const preRegCompanyPart = visitorCompany ? ` from ${visitorCompany}` : '';
     await Notification.create({
       userId: hostId,
       type: 'pre-registration',
       title: 'Pre-registered visitor',
-      body: `${visitorName} from ${visitorCompany} has been pre-registered for your meeting.`,
+      body: `${visitorName}${preRegCompanyPart} has been pre-registered for your meeting.`,
       relatedVisitId: visit._id,
     });
     logAuditFromReq(req, {
@@ -330,11 +334,12 @@ async function updateVisitor(req, res, next) {
     await visit.save();
 
     if (isCheckIn) {
+      const checkInCompanyPart = visit.visitorCompany ? ` from ${visit.visitorCompany}` : '';
       await Notification.create({
         userId: visit.hostId,
         type: 'check-in',
         title: 'Visitor checked in',
-        body: `${visit.visitorName} from ${visit.visitorCompany} has checked in.`,
+        body: `${visit.visitorName}${checkInCompanyPart} has checked in.`,
         relatedVisitId: visit._id,
       });
       emitToUser(visit.hostId.toString(), 'visit:checked-in', { visitId: visit._id.toString(), visitorName: visit.visitorName, company: visit.visitorCompany });
