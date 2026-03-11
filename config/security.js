@@ -43,12 +43,17 @@ const COOKIE_OPTIONS = {
 };
 
 /** Rate limits (per IP) – stricter on auth. */
+const apiMaxEnv = process.env.RATE_LIMIT_API_MAX;
+const apiMax = apiMaxEnv != null && apiMaxEnv !== '' && !Number.isNaN(Number(apiMaxEnv))
+  ? Math.max(1, Number(apiMaxEnv))
+  : (isProduction ? 200 : 2000);
+
 const RATE_LIMITS = {
   login: { windowMs: 15 * 60 * 1000, max: 50 },
   refresh: { windowMs: 15 * 60 * 1000, max: 20 },
   otp: { windowMs: 15 * 60 * 1000, max: isProduction ? 3 : 10 },
   public: { windowMs: 1 * 60 * 1000, max: 60 },
-  api: { windowMs: 15 * 60 * 1000, max: isProduction ? 200 : 2000 },
+  api: { windowMs: 15 * 60 * 1000, max: apiMax },
 };
 
 /** Weak/default secrets that must not be used in production. */
