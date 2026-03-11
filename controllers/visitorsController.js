@@ -19,17 +19,27 @@ const EXPIRABLE_STATUSES = [
   'confirmed',
 ];
 
+const EXPIRY_HOURS_AFTER_REGISTRATION = 8;
+
 function shouldExpireVisit(visitLike) {
   if (!visitLike) return false;
   if (!EXPIRABLE_STATUSES.includes(visitLike.status)) return false;
   if (visitLike.checkInTime) return false;
-  const expiryTime = visitLike.scheduledEnd || visitLike.scheduledStart;
-  if (!expiryTime) return false;
-  return new Date(expiryTime).getTime() <= Date.now();
+  const now = Date.now();
+  let expiryTime = visitLike.scheduledEnd || visitLike.scheduledStart;
+  if (expiryTime) {
+    return new Date(expiryTime).getTime() <= now;
+  }
+  // No schedule: expire 8 hours after registration (createdAt).
+  const createdAt = visitLike.createdAt;
+  if (!createdAt) return false;
+  const expiryAt = new Date(createdAt).getTime() + EXPIRY_HOURS_AFTER_REGISTRATION * 60 * 60 * 1000;
+  return expiryAt <= now;
 }
 
 function buildDueExpiryFilter(baseFilter = {}) {
   const now = new Date();
+  const eightHoursAgo = new Date(now.getTime() - EXPIRY_HOURS_AFTER_REGISTRATION * 60 * 60 * 1000);
   return {
     ...baseFilter,
     status: { $in: EXPIRABLE_STATUSES },
@@ -37,6 +47,7 @@ function buildDueExpiryFilter(baseFilter = {}) {
     $or: [
       { scheduledEnd: { $ne: null, $lte: now } },
       { scheduledEnd: null, scheduledStart: { $ne: null, $lte: now } },
+      { scheduledEnd: null, scheduledStart: null, createdAt: { $lte: eightHoursAgo } },
     ],
   };
 }
