@@ -4,10 +4,10 @@ const { VISIT_TYPE, VISIT_STATUS } = require('../config/constants');
 const createVisitorSchema = Joi.object({
   name: Joi.string().min(1).max(200).trim(),
   visitorName: Joi.string().min(1).max(200).trim(),
-  email: Joi.string().email({ tlds: { allow: false } }).max(254),
-  visitorEmail: Joi.string().email({ tlds: { allow: false } }).max(254),
-  company: Joi.string().max(200).trim(),
-  visitorCompany: Joi.string().max(200).trim(),
+  email: Joi.string().email({ tlds: { allow: false } }).max(254).allow('', null),
+  visitorEmail: Joi.string().email({ tlds: { allow: false } }).max(254).allow('', null),
+  company: Joi.string().max(200).trim().allow('', null),
+  visitorCompany: Joi.string().max(200).trim().allow('', null),
   phone: Joi.string().max(30).trim().allow(null, ''),
   visitorPhone: Joi.string().max(30).trim().allow(null, ''),
   hostId: Joi.string().required(),
@@ -35,8 +35,8 @@ const createVisitorSchema = Joi.object({
 
 const updateVisitorSchema = Joi.object({
   visitorName: Joi.string().min(1).max(200).trim(),
-  visitorEmail: Joi.string().email({ tlds: { allow: false } }).max(254),
-  visitorCompany: Joi.string().max(200).trim(),
+  visitorEmail: Joi.string().email({ tlds: { allow: false } }).max(254).allow('', null),
+  visitorCompany: Joi.string().max(200).trim().allow('', null),
   visitorPhone: Joi.string().max(30).trim().allow(null, ''),
   reason: Joi.string().max(100).trim(),
   additionalNotes: Joi.string().max(2000).trim().allow(null, ''),
