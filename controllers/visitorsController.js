@@ -344,21 +344,23 @@ async function updateVisitor(req, res, next) {
         relatedVisitId: visit._id,
       });
 
-      // Best-effort email notification to host.
+      // Best-effort email notification to host (non-blocking).
       if (isEmailConfigured && isEmailConfigured()) {
-        try {
-          const host = await User.findById(visit.hostId).select('fullName email');
-          if (host && host.email) {
-            await sendCheckInNotificationToHost(
-              host.email,
-              host.fullName || 'Host',
-              visit.visitorName,
-              visit.visitorCompany || ''
-            );
+        (async () => {
+          try {
+            const host = await User.findById(visit.hostId).select('fullName email');
+            if (host && host.email) {
+              await sendCheckInNotificationToHost(
+                host.email,
+                host.fullName || 'Host',
+                visit.visitorName,
+                visit.visitorCompany || ''
+              );
+            }
+          } catch (e) {
+            // Email failures should not block check-in flow.
           }
-        } catch (e) {
-          // Email failures should not block check-in flow.
-        }
+        })();
       }
 
       emitToUser(visit.hostId.toString(), 'visit:checked-in', {
