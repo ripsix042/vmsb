@@ -65,7 +65,42 @@ async function sendWelcomeEmail(to, name, temporaryPassword = null) {
 async function sendCheckInNotificationToHost(hostEmail, hostName, visitorName, visitorCompany = '') {
   const subject = `Visitor checked in: ${visitorName}`;
   const text = `Hello ${hostName},\n\n${visitorName}${visitorCompany ? ` from ${visitorCompany}` : ''} has checked in.\n\n— Kora VMS`;
-  const html = `<p>Hello ${escapeHtml(hostName)},</p><p><strong>${escapeHtml(visitorName)}</strong>${visitorCompany ? ` from ${escapeHtml(visitorCompany)}` : ''} has checked in.</p><p>— Kora VMS</p>`;
+  const html = `
+    <div style="background:#f3f4f6;padding:24px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+      <div style="max-width:480px;margin:0 auto;background:#e0f1ff;border-radius:5px;overflow:hidden;box-shadow:0 10px 30px rgba(15,23,42,0.15);">
+        <div style="background:linear-gradient(90deg,#2563eb,#3b82f6);padding:16px 24px;color:#ecfeff;display:flex;align-items:center;gap:12px;border-top: 4px solid #2563eb;border-bottom: 4px solid #3b82f6;">
+          <img src="kora-vms-BE/public/kora-logo.png" alt="Kora VMS" style="width:32px;height:32px;border-radius:8px;object-fit:cover;" />
+          <div style="text-align:center; width:100%;">
+            <div style="font-size:14px;opacity:.85;">Visitor check-in</div>
+            <div style="font-size:18px;font-weight:600;">${escapeHtml(visitorName)} has arrived</div>
+          </div>
+        </div>
+        <div style="padding:20px 24px;color:#0f172a;">
+          <p style="margin:0 0 12px;">Hello ${escapeHtml(hostName)},</p>
+          <p style="margin:0 0 16px;">
+            <strong>${escapeHtml(visitorName)}</strong>
+            ${visitorCompany ? ` from <span style="font-weight:500;">${escapeHtml(visitorCompany)}</span>` : ''}
+            has just checked in to see you.
+          </p>
+          <div style="margin:16px 0;padding:12px 14px;border-radius:10px;background:#f9fafb;border:1px solid #e5e7eb;">
+            <div style="font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin-bottom:6px;">
+              Visit summary
+            </div>
+            <div style="font-size:14px;color:#111827;">
+              <div><span style="color:#6b7280;">Visitor:</span> <strong>${escapeHtml(visitorName)}</strong></div>
+              ${visitorCompany ? `<div><span style="color:#6b7280;">Company:</span> ${escapeHtml(visitorCompany)}</div>` : ''}
+            </div>
+          </div>
+          <p style="margin:0 0 20px;font-size:14px;color:#4b5563; text-align:center;">
+           Thank you for using Kora VMS .
+          </p>
+        </div>
+        <div style="padding:12px 24px;background:#f9fafb;font-size:12px;color:#666c78;text-align:center;">
+          Kora VMS
+        </div>
+      </div>
+    </div>
+  `;
   return sendMail({ to: hostEmail, subject, text, html });
 }
 

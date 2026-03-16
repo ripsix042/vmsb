@@ -1,13 +1,14 @@
 const mongoose = require('mongoose');
 const Visit = require('../models/Visit');
-const Notification = require('../models/Notification');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const { generateVisitId, generateQrToken } = require('../utils/visitId');
 const { notFound, conflict, forbidden, badRequest } = require('../utils/errors');
 const { VISIT_STATUS, VISIT_TYPE } = require('../config/constants');
 const { ROLES } = require('../config/constants');
 const { emitToUser, emitGlobal } = require('../services/socket');
 const { logAuditFromReq } = require('../services/auditLog');
+const { sendCheckInNotificationToHost, isConfigured: isEmailConfigured } = require('../services/emailService');
 
 // Include legacy status values so older records still auto-expire.
 const EXPIRABLE_STATUSES = [
@@ -342,7 +343,29 @@ async function updateVisitor(req, res, next) {
         body: `${visit.visitorName}${checkInCompanyPart} has checked in.`,
         relatedVisitId: visit._id,
       });
-      emitToUser(visit.hostId.toString(), 'visit:checked-in', { visitId: visit._id.toString(), visitorName: visit.visitorName, company: visit.visitorCompany });
+
+      // Best-effort email notification to host.
+      if (isEmailConfigured && isEmailConfigured()) {
+        try {
+          const host = await User.findById(visit.hostId).select('fullName email');
+          if (host && host.email) {
+            await sendCheckInNotificationToHost(
+              host.email,
+              host.fullName || 'Host',
+              visit.visitorName,
+              visit.visitorCompany || ''
+            );
+          }
+        } catch (e) {
+          // Email failures should not block check-in flow.
+        }
+      }
+
+      emitToUser(visit.hostId.toString(), 'visit:checked-in', {
+        visitId: visit._id.toString(),
+        visitorName: visit.visitorName,
+        company: visit.visitorCompany,
+      });
       logAuditFromReq(req, {
         action: 'visitor_check_in',
         resourceType: 'Visit',
