@@ -24,6 +24,7 @@ const VISIT_STATUS = {
   PENDING_APPROVAL: 'pending_approval',
   APPROVED: 'approved',
   DECLINED: 'declined',
+  EXPIRED: 'expired',
   ON_SITE: 'on_site',
   CHECKED_OUT: 'checked_out',
 };
