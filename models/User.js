@@ -21,6 +21,9 @@ const userSchema = new mongoose.Schema(
     },
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorSecret: { type: String, default: null, select: false },
+    /** Set once via PATCH /users/me/department (admin & employee only). Denormalized name for API responses. */
+    departmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Department', default: null },
+    departmentName: { type: String, default: null, trim: true, maxlength: 120 },
   },
   { timestamps: true }
 );

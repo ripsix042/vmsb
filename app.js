@@ -9,6 +9,7 @@ const { getCorsOrigin, RATE_LIMITS, isProduction } = require('./config/security'
 const authRoutes = require('./routes/auth');
 const publicRoutes = require('./routes/public');
 const usersRoutes = require('./routes/users');
+const departmentsRoutes = require('./routes/departments');
 const visitRequestsRoutes = require('./routes/visitRequests');
 const visitorsRoutes = require('./routes/visitors');
 const notificationsRoutes = require('./routes/notifications');
@@ -59,6 +60,7 @@ const apiLimiter = rateLimit({
 });
 app.use(API_PREFIX, apiLimiter);
 app.use(`${API_PREFIX}/auth`, authRoutes);
+app.use(`${API_PREFIX}/departments`, departmentsRoutes);
 app.use(`${API_PREFIX}/users`, usersRoutes);
 app.use(`${API_PREFIX}/visit-requests`, visitRequestsRoutes);
 app.use(`${API_PREFIX}/visitors`, visitorsRoutes);

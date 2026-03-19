@@ -2,6 +2,7 @@ const express = require('express');
 const {
   getMe,
   updateMe,
+  setMyDepartment,
   getProfileById,
   listHosts,
   listStaff,
@@ -18,6 +19,7 @@ const {
   createStaffSchema,
   updateStaffRoleSchema,
   updateStaffStatusSchema,
+  setMyDepartmentSchema,
 } = require('../validators/users');
 
 const router = express.Router();
@@ -25,6 +27,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get('/me', getMe);
+router.patch('/me/department', validate(setMyDepartmentSchema), setMyDepartment);
 router.patch('/me', validate(updateMeSchema), updateMe);
 router.get('/hosts', listHosts);
 router.get('/staff', requireAdmin, listStaff);

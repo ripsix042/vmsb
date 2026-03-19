@@ -32,9 +32,14 @@ const updateStaffStatusSchema = Joi.object({
   isActive: Joi.boolean().required(),
 });
 
+const setMyDepartmentSchema = Joi.object({
+  departmentId: Joi.string().required().trim(),
+});
+
 module.exports = {
   updateMeSchema,
   createStaffSchema,
   updateStaffRoleSchema,
   updateStaffStatusSchema,
+  setMyDepartmentSchema,
 };
