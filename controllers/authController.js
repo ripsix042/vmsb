@@ -33,6 +33,14 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+function departmentFieldsForUser(user) {
+  const u = user.toObject ? user.toObject() : user;
+  return {
+    department_id: u.departmentId ? u.departmentId.toString() : null,
+    department_name: u.departmentName || null,
+  };
+}
+
 function generateRefreshToken() {
   return crypto.randomBytes(40).toString('hex');
 }
@@ -58,6 +66,7 @@ function createAccessPayload(user) {
       fullName: user.fullName,
       email: user.email,
       role: user.role,
+      ...departmentFieldsForUser(user),
     },
     role: toFrontendRole(user.role),
   };
@@ -144,6 +153,7 @@ const login = async (req, res, next) => {
         fullName: user.fullName,
         email: user.email,
         role: user.role,
+        ...departmentFieldsForUser(user),
       },
       role: toFrontendRole(user.role),
     };
@@ -168,6 +178,7 @@ const me = async (req, res, next) => {
         id: user._id,
         fullName: user.fullName,
         email: user.email,
+        ...departmentFieldsForUser(user),
       },
       role: toFrontendRole(user.role),
     });
@@ -206,6 +217,7 @@ const register = async (req, res, next) => {
         fullName: user.fullName,
         email: user.email,
         role: user.role,
+        ...departmentFieldsForUser(user),
       },
       role: 'employee',
       token: accessToken,
@@ -248,6 +260,7 @@ const kioskRegister = async (req, res, next) => {
         fullName: user.fullName,
         email: user.email,
         role: user.role,
+        ...departmentFieldsForUser(user),
       },
       role: 'kiosk_operator',
       token: accessToken,
