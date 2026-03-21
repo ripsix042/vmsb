@@ -22,6 +22,20 @@ const {
 const { logAudit } = require('../services/auditLog');
 const { generateSecret, verifyCode, buildOtpAuthUrl } = require('../services/totp');
 const {
+  randomPKCECodeVerifier,
+  calculatePKCECodeChallenge,
+  randomNonce,
+  randomState,
+  buildLoginUrl,
+  exchangeCodeForTokens,
+  getUserInfo,
+} = require('../services/oktaOidc');
+const {
+  OKTA_POST_LOGIN_REDIRECT,
+  OKTA_AUTO_PROVISION,
+  oktaCookieOptions,
+} = require('../config/okta');
+const {
   setSetupSession,
   getSetupSession,
   clearSetupSession,
@@ -79,6 +93,133 @@ async function attachRefreshToPayload(payload, user, req, res) {
   }
   return payload;
 }
+
+function setOktaTransientCookies(res, { state, nonce, codeVerifier }) {
+  const opts = oktaCookieOptions();
+  res.cookie('okta_state', state, opts);
+  res.cookie('okta_nonce', nonce, opts);
+  res.cookie('okta_cv', codeVerifier, opts);
+}
+
+function clearOktaTransientCookies(res) {
+  const opts = oktaCookieOptions();
+  res.clearCookie('okta_state', { path: opts.path });
+  res.clearCookie('okta_nonce', { path: opts.path });
+  res.clearCookie('okta_cv', { path: opts.path });
+}
+
+/**
+ * GET /auth/okta/login
+ * Redirects user to Okta for Admin/Employee SSO (OIDC Authorization Code + PKCE).
+ */
+const oktaLogin = async (req, res, next) => {
+  try {
+    const state = randomState();
+    const nonce = randomNonce();
+    const codeVerifier = randomPKCECodeVerifier();
+    const codeChallenge = await calculatePKCECodeChallenge(codeVerifier);
+
+    setOktaTransientCookies(res, { state, nonce, codeVerifier });
+    const url = await buildLoginUrl({ state, nonce, codeChallenge });
+    res.redirect(url);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /auth/okta/callback
+ * Exchanges code for tokens, validates state/nonce, maps Okta user to local user,
+ * then issues our API access/refresh tokens and redirects back to frontend.
+ */
+const oktaCallback = async (req, res, next) => {
+  try {
+    const { code, state } = req.query;
+    const expectedState = req.cookies?.okta_state;
+    const expectedNonce = req.cookies?.okta_nonce;
+    const pkceCodeVerifier = req.cookies?.okta_cv;
+
+    if (!code || typeof code !== 'string') throw badRequest('Missing authorization code');
+    if (!state || typeof state !== 'string') throw badRequest('Missing state');
+    if (!expectedState || !pkceCodeVerifier || !expectedNonce) {
+      clearOktaTransientCookies(res);
+      throw unauthorized('SSO session expired. Please try again.');
+    }
+    if (state !== expectedState) {
+      clearOktaTransientCookies(res);
+      throw unauthorized('Invalid state');
+    }
+
+    // Current URL must include callback params for openid-client v6
+    const currentUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+    const tokens = await exchangeCodeForTokens({
+      currentUrl,
+      pkceCodeVerifier,
+      expectedState,
+      expectedNonce,
+    });
+    clearOktaTransientCookies(res);
+
+    const claims = typeof tokens?.claims === 'function' ? tokens.claims() : {};
+    const userInfo = await getUserInfo(tokens);
+
+    const email =
+      (claims && (claims.email || claims.preferred_username)) ||
+      (userInfo && (userInfo.email || userInfo.preferred_username));
+    const fullName =
+      (claims && (claims.name || claims.given_name)) ||
+      (userInfo && (userInfo.name || userInfo.given_name)) ||
+      '';
+
+    if (!email || typeof email !== 'string') {
+      throw unauthorized('Okta did not return an email for this user');
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+
+    let user = await User.findOne({ email: normalizedEmail }).select('-passwordHash');
+    if (!user) {
+      if (!OKTA_AUTO_PROVISION) {
+        throw unauthorized('Account is not provisioned. Contact an admin.');
+      }
+      user = await User.create({
+        fullName: fullName ? String(fullName).trim() : normalizedEmail,
+        email: normalizedEmail,
+        // Not used for Okta users; required by schema. Use random value.
+        passwordHash: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), PASSWORD.BCRYPT_ROUNDS),
+        role: ROLES.EMPLOYEE,
+        status: USER_STATUS.ACTIVE,
+      });
+    }
+    if (user.status !== 'Active') {
+      throw unauthorized('Account is inactive');
+    }
+
+    logLoginSuccess(req, user._id, normalizedEmail);
+    logAudit({
+      userId: user._id,
+      action: 'login_okta',
+      metadata: { summary: 'Signed in with Okta', role: toFrontendRole(user.role) },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+
+    // Issue our API tokens, then redirect to frontend
+    let payload = createAccessPayload(user);
+    payload = await attachRefreshToPayload(payload, user, req, res);
+
+    if (!OKTA_POST_LOGIN_REDIRECT) {
+      return res.json(payload);
+    }
+
+    const redirectUrl = new URL(OKTA_POST_LOGIN_REDIRECT);
+    redirectUrl.searchParams.set('token', payload.token);
+    if (payload.refreshToken) redirectUrl.searchParams.set('refreshToken', payload.refreshToken);
+    redirectUrl.searchParams.set('role', payload.role);
+    res.redirect(redirectUrl.toString());
+  } catch (err) {
+    next(err);
+  }
+};
 
 /**
  * POST /auth/login
@@ -568,6 +709,8 @@ const otpVerify = async (req, res, next) => {
 
 module.exports = {
   login,
+  oktaLogin,
+  oktaCallback,
   refresh,
   logout,
   me,

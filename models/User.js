@@ -4,12 +4,10 @@ const { ROLES, USER_STATUS } = require('../config/constants');
 
 const userSchema = new mongoose.Schema(
   {
-    fullName: { type: String, 
-      required: true, 
-      trim: true 
-    },
+    fullName: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true, select: false },
+    phone: { type: String, trim: true, default: null },
     role: {
       type: String,
       required: true,
@@ -21,6 +19,8 @@ const userSchema = new mongoose.Schema(
       default: USER_STATUS.ACTIVE,
       enum: Object.values(USER_STATUS),
     },
+    twoFactorEnabled: { type: Boolean, default: false },
+    twoFactorSecret: { type: String, default: null, select: false },
   },
   { timestamps: true }
 );
