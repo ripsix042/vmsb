@@ -29,8 +29,8 @@ if (!uri.startsWith('mongodb+srv://') && !uri.startsWith('mongodb://')) {
   console.error('MONGODB_URI should start with mongodb+srv:// or mongodb://. Got:', uri.substring(0, 50) + '...');
   process.exit(1);
 }
-if (uri.includes('localhost') || uri.includes('127.0.0.1')) {
-  console.error('MONGODB_URI in .env is set to localhost. Replace it with your Atlas connection string and save the file.');
+if (process.env.NODE_ENV === 'production' && (uri.includes('localhost') || uri.includes('127.0.0.1'))) {
+  console.error('MONGODB_URI is set to localhost. Use an Atlas connection string in production.');
   process.exit(1);
 }
 
@@ -55,8 +55,9 @@ connectDB(uri)
     const server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
     });
-    // Socket.io will be attached here in Week 4
     app.set('httpServer', server);
+    const { attachSocket } = require('./services/socket');
+    attachSocket(server);
   })
   .catch((err) => {
     console.error('Failed to start server:', err);
