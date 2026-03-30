@@ -1,12 +1,18 @@
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const User = require('../models/User');
+const Department = require('../models/Department');
 const RefreshToken = require('../models/RefreshToken');
 const { toFrontendRole } = require('../utils/roleMap');
 const { notFound, forbidden, conflict, badRequest } = require('../utils/errors');
 const { ROLES, USER_STATUS } = require('../config/constants');
 const { PASSWORD } = require('../config/security');
 const { logAuditFromReq } = require('../services/auditLog');
+
+function departmentIdToString(departmentId) {
+  if (departmentId == null) return null;
+  return typeof departmentId === 'string' ? departmentId : departmentId.toString();
+}
 
 function userToProfile(user) {
   if (!user) return null;
@@ -17,6 +23,8 @@ function userToProfile(user) {
     email: u.email,
     phone: u.phone || null,
     is_active: u.status === USER_STATUS.ACTIVE,
+    department_id: departmentIdToString(u.departmentId),
+    department_name: u.departmentName || null,
   };
 }
 
@@ -24,6 +32,40 @@ async function getMe(req, res, next) {
   try {
     const profile = userToProfile(req.user);
     res.json(profile);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function setMyDepartment(req, res, next) {
+  try {
+    const { departmentId } = req.body;
+    const user = req.user;
+    if (user.role === ROLES.KIOSK_OPERATOR) {
+      throw forbidden('Kiosk operators cannot set a department');
+    }
+    if (user.role !== ROLES.ADMIN && user.role !== ROLES.EMPLOYEE) {
+      throw forbidden('Only admin and employee users can set a department');
+    }
+    const current = await User.findById(user._id).select('departmentId');
+    if (!current) throw notFound('User not found');
+    if (current.departmentId) {
+      throw conflict('Department is already set and cannot be changed');
+    }
+    if (!mongoose.isValidObjectId(departmentId)) {
+      throw badRequest('Invalid departmentId');
+    }
+    const dept = await Department.findById(departmentId).select('name');
+    if (!dept) {
+      throw notFound('Department not found');
+    }
+    const updated = await User.findByIdAndUpdate(
+      user._id,
+      { departmentId: dept._id, departmentName: dept.name },
+      { new: true, runValidators: true }
+    ).select('-passwordHash');
+    if (!updated) throw notFound('User not found');
+    res.json(userToProfile(updated));
   } catch (err) {
     next(err);
   }
@@ -59,6 +101,8 @@ async function getProfileById(req, res, next) {
         email: null,
         phone: null,
         is_active: false,
+        department_id: null,
+        department_name: null,
       });
     }
     return res.json(userToProfile(user));
@@ -73,13 +117,15 @@ async function listHosts(req, res, next) {
       role: { $in: [ROLES.ADMIN, ROLES.EMPLOYEE] },
       status: USER_STATUS.ACTIVE,
     })
-      .select('fullName email phone')
+      .select('fullName email phone departmentId departmentName')
       .lean();
     const hosts = users.map((u) => ({
       id: u._id.toString(),
       name: u.fullName,
       email: u.email,
-      department: 'Staff',
+      department: u.departmentName || null,
+      department_id: departmentIdToString(u.departmentId),
+      department_name: u.departmentName || null,
       phone: u.phone || undefined,
     }));
     res.json({ hosts });
@@ -104,6 +150,8 @@ async function listStaff(req, res, next) {
       phone: u.phone || null,
       is_active: u.status === USER_STATUS.ACTIVE,
       is_online: onlineUserIds.has(u._id.toString()),
+      department_id: departmentIdToString(u.departmentId),
+      department_name: u.departmentName || null,
     }));
     const roles = {};
     users.forEach((u) => {
@@ -223,6 +271,7 @@ async function deleteStaff(req, res, next) {
 module.exports = {
   getMe,
   updateMe,
+  setMyDepartment,
   getProfileById,
   listHosts,
   listStaff,

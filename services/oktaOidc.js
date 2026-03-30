@@ -10,41 +10,46 @@ const {
 } = require('openid-client');
 const {
   OKTA_ISSUER,
-  OKTA_CLIENT_ID,
-  OKTA_CLIENT_SECRET,
   OKTA_REDIRECT_URI,
   OKTA_SCOPES,
+  assertOktaEnvPresent,
 } = require('../config/okta');
 
-let cachedConfigPromise = null;
+/** @type {Map<string, Promise<unknown>>} */
+const configCache = new Map();
 
-function assertOktaConfigured() {
-  const missing = [];
-  if (!OKTA_ISSUER) missing.push('OKTA_ISSUER');
-  if (!OKTA_CLIENT_ID) missing.push('OKTA_CLIENT_ID');
-  if (!OKTA_REDIRECT_URI) missing.push('OKTA_REDIRECT_URI');
-  if (missing.length) {
-    const msg = `Okta is not configured. Missing: ${missing.join(', ')}`;
-    const err = new Error(msg);
-    err.statusCode = 500;
-    throw err;
+function wrapDiscoveryError(err) {
+  const status = err?.cause?.status ?? err?.response?.status;
+  const tried = err?.cause?.url || '';
+  if (status === 403 || status === 401) {
+    const hint =
+      'OIDC discovery was blocked or denied. Usually OKTA_ISSUER is wrong: it must be the Issuer URI that ends with /oauth2/default (see Okta Admin → Security → API). If the issuer is correct, Cloudflare/WAF may be blocking your server IP—in that case allowlist your API egress IP or ask IT.';
+    const e = new Error(`${hint} (HTTP ${status}${tried ? `, tried ${tried}` : ''})`);
+    e.statusCode = 502;
+    e.cause = err;
+    return e;
   }
+  const e = new Error(`OIDC discovery failed: ${err.message || String(err)}`);
+  e.statusCode = 502;
+  e.cause = err;
+  return e;
 }
 
-async function getOktaConfig() {
-  assertOktaConfigured();
-  if (!cachedConfigPromise) {
-    cachedConfigPromise = discovery(
-      new URL(OKTA_ISSUER),
-      OKTA_CLIENT_ID,
-      OKTA_CLIENT_SECRET
-    );
+async function getOktaConfig(clientId, clientSecret) {
+  assertOktaEnvPresent();
+  const key = `${OKTA_ISSUER}|${clientId}`;
+  if (!configCache.has(key)) {
+    const p = discovery(new URL(OKTA_ISSUER), clientId, clientSecret || undefined).catch((err) => {
+      configCache.delete(key);
+      throw wrapDiscoveryError(err);
+    });
+    configCache.set(key, p);
   }
-  return cachedConfigPromise;
+  return configCache.get(key);
 }
 
-async function buildLoginUrl({ state, nonce, codeChallenge }) {
-  const config = await getOktaConfig();
+async function buildLoginUrl({ state, nonce, codeChallenge, clientId, clientSecret }) {
+  const config = await getOktaConfig(clientId, clientSecret);
   const url = buildAuthorizationUrl(config, {
     redirect_uri: OKTA_REDIRECT_URI,
     scope: OKTA_SCOPES,
@@ -57,8 +62,15 @@ async function buildLoginUrl({ state, nonce, codeChallenge }) {
   return url.toString();
 }
 
-async function exchangeCodeForTokens({ currentUrl, pkceCodeVerifier, expectedState, expectedNonce }) {
-  const config = await getOktaConfig();
+async function exchangeCodeForTokens({
+  currentUrl,
+  pkceCodeVerifier,
+  expectedState,
+  expectedNonce,
+  clientId,
+  clientSecret,
+}) {
+  const config = await getOktaConfig(clientId, clientSecret);
   const tokens = await authorizationCodeGrant(
     config,
     currentUrl,
@@ -67,10 +79,13 @@ async function exchangeCodeForTokens({ currentUrl, pkceCodeVerifier, expectedSta
   return tokens;
 }
 
-async function getUserInfo(tokens) {
-  const config = await getOktaConfig();
+async function getUserInfo(tokens, clientId, clientSecret) {
+  const config = await getOktaConfig(clientId, clientSecret);
   if (!tokens?.access_token) return null;
-  return fetchUserInfo(config, tokens.access_token);
+  const claims = typeof tokens?.claims === 'function' ? tokens.claims() : null;
+  const expectedSubject = claims && typeof claims.sub === 'string' ? claims.sub : null;
+  if (!expectedSubject) return null;
+  return fetchUserInfo(config, tokens.access_token, expectedSubject);
 }
 
 module.exports = {
@@ -82,4 +97,3 @@ module.exports = {
   exchangeCodeForTokens,
   getUserInfo,
 };
-

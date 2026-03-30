@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "seed:reasons": "node scripts/seedReasons.js",
+    "seed:departments": "node scripts/seedDepartments.js",
     "create-admin": "node scripts/createAdmin.js"
   },
   "engines": {

@@ -33,6 +33,8 @@ const {
 const {
   OKTA_POST_LOGIN_REDIRECT,
   OKTA_AUTO_PROVISION,
+  isDualOktaMode,
+  getOktaClientCredentials,
   oktaCookieOptions,
 } = require('../config/okta');
 const {
@@ -45,6 +47,14 @@ const {
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function departmentFieldsForUser(user) {
+  const u = user.toObject ? user.toObject() : user;
+  return {
+    department_id: u.departmentId ? u.departmentId.toString() : null,
+    department_name: u.departmentName || null,
+  };
 }
 
 function generateRefreshToken() {
@@ -72,6 +82,7 @@ function createAccessPayload(user) {
       fullName: user.fullName,
       email: user.email,
       role: user.role,
+      ...departmentFieldsForUser(user),
     },
     role: toFrontendRole(user.role),
   };
@@ -94,11 +105,12 @@ async function attachRefreshToPayload(payload, user, req, res) {
   return payload;
 }
 
-function setOktaTransientCookies(res, { state, nonce, codeVerifier }) {
+function setOktaTransientCookies(res, { state, nonce, codeVerifier, intent }) {
   const opts = oktaCookieOptions();
   res.cookie('okta_state', state, opts);
   res.cookie('okta_nonce', nonce, opts);
   res.cookie('okta_cv', codeVerifier, opts);
+  res.cookie('okta_intent', intent, opts);
 }
 
 function clearOktaTransientCookies(res) {
@@ -106,21 +118,55 @@ function clearOktaTransientCookies(res) {
   res.clearCookie('okta_state', { path: opts.path });
   res.clearCookie('okta_nonce', { path: opts.path });
   res.clearCookie('okta_cv', { path: opts.path });
+  res.clearCookie('okta_intent', { path: opts.path });
+}
+
+/** OAuth/OIDC error or incomplete callback: send user back to SPA instead of JSON 400. */
+function redirectOktaFailure(res, { error, errorDescription }) {
+  clearOktaTransientCookies(res);
+  const code = error || 'okta_callback_failed';
+  const desc = errorDescription ? String(errorDescription).slice(0, 500) : '';
+  if (!OKTA_POST_LOGIN_REDIRECT) {
+    return res.status(400).json({
+      error: code,
+      message: desc || 'Okta sign-in did not complete',
+    });
+  }
+  const url = new URL(OKTA_POST_LOGIN_REDIRECT);
+  url.searchParams.set('error', code);
+  if (desc) url.searchParams.set('error_description', desc);
+  return res.redirect(url.toString());
 }
 
 /**
  * GET /auth/okta/login
  * Redirects user to Okta for Admin/Employee SSO (OIDC Authorization Code + PKCE).
+ * Dual Okta apps: ?intent=admin | ?intent=host (or employee → host). Single app: omit intent.
  */
 const oktaLogin = async (req, res, next) => {
   try {
+    const raw = String(req.query.intent || '').toLowerCase();
+    let intentCookie = 'legacy';
+    if (isDualOktaMode()) {
+      if (raw === 'admin') intentCookie = 'admin';
+      else if (raw === 'host' || raw === 'employee') intentCookie = 'host';
+      else {
+        return res.status(400).json({
+          error: 'missing_intent',
+          message: 'This deployment uses separate Okta apps for admin and host. Use ?intent=admin or ?intent=host',
+        });
+      }
+    }
+
+    const { clientId, clientSecret } = getOktaClientCredentials(intentCookie === 'legacy' ? 'legacy' : intentCookie);
+
     const state = randomState();
     const nonce = randomNonce();
     const codeVerifier = randomPKCECodeVerifier();
     const codeChallenge = await calculatePKCECodeChallenge(codeVerifier);
 
-    setOktaTransientCookies(res, { state, nonce, codeVerifier });
-    const url = await buildLoginUrl({ state, nonce, codeChallenge });
+    setOktaTransientCookies(res, { state, nonce, codeVerifier, intent: intentCookie });
+    const url = await buildLoginUrl({ state, nonce, codeChallenge, clientId, clientSecret });
     res.redirect(url);
   } catch (err) {
     next(err);
@@ -134,12 +180,28 @@ const oktaLogin = async (req, res, next) => {
  */
 const oktaCallback = async (req, res, next) => {
   try {
+    const oidcError = req.query.error;
+    const oidcErrorDesc = req.query.error_description;
+    if (oidcError && typeof oidcError === 'string') {
+      return redirectOktaFailure(res, {
+        error: oidcError,
+        errorDescription: typeof oidcErrorDesc === 'string' ? oidcErrorDesc : undefined,
+      });
+    }
+
     const { code, state } = req.query;
     const expectedState = req.cookies?.okta_state;
     const expectedNonce = req.cookies?.okta_nonce;
     const pkceCodeVerifier = req.cookies?.okta_cv;
+    const oktaIntent = req.cookies?.okta_intent;
 
-    if (!code || typeof code !== 'string') throw badRequest('Missing authorization code');
+    if (!code || typeof code !== 'string') {
+      return redirectOktaFailure(res, {
+        error: 'missing_authorization_code',
+        errorDescription:
+          'No authorization code returned. Use Sign in with Okta from the app, or complete sign-in at Okta.',
+      });
+    }
     if (!state || typeof state !== 'string') throw badRequest('Missing state');
     if (!expectedState || !pkceCodeVerifier || !expectedNonce) {
       clearOktaTransientCookies(res);
@@ -150,18 +212,31 @@ const oktaCallback = async (req, res, next) => {
       throw unauthorized('Invalid state');
     }
 
-    // Current URL must include callback params for openid-client v6
-    const currentUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+    if (isDualOktaMode()) {
+      if (oktaIntent !== 'admin' && oktaIntent !== 'host') {
+        clearOktaTransientCookies(res);
+        throw unauthorized('SSO session expired. Please try again.');
+      }
+    }
+
+    const { clientId, clientSecret } = getOktaClientCredentials(
+      isDualOktaMode() ? oktaIntent : 'legacy'
+    );
+
+    // openid-client v6 requires a URL object (or Request), not a string.
+    const currentUrl = new URL(`${req.protocol}://${req.get('host')}${req.originalUrl}`);
     const tokens = await exchangeCodeForTokens({
       currentUrl,
       pkceCodeVerifier,
       expectedState,
       expectedNonce,
+      clientId,
+      clientSecret,
     });
     clearOktaTransientCookies(res);
 
     const claims = typeof tokens?.claims === 'function' ? tokens.claims() : {};
-    const userInfo = await getUserInfo(tokens);
+    const userInfo = await getUserInfo(tokens, clientId, clientSecret);
 
     const email =
       (claims && (claims.email || claims.preferred_username)) ||
@@ -192,6 +267,15 @@ const oktaCallback = async (req, res, next) => {
     }
     if (user.status !== 'Active') {
       throw unauthorized('Account is inactive');
+    }
+
+    if (isDualOktaMode()) {
+      if (oktaIntent === 'admin' && user.role !== ROLES.ADMIN) {
+        throw unauthorized('This account is not an administrator. Use the host sign-in with Okta.');
+      }
+      if (oktaIntent === 'host' && user.role !== ROLES.EMPLOYEE) {
+        throw unauthorized('This account is not a host. Use the admin sign-in with Okta.');
+      }
     }
 
     logLoginSuccess(req, user._id, normalizedEmail);
@@ -285,6 +369,7 @@ const login = async (req, res, next) => {
         fullName: user.fullName,
         email: user.email,
         role: user.role,
+        ...departmentFieldsForUser(user),
       },
       role: toFrontendRole(user.role),
     };
@@ -309,6 +394,7 @@ const me = async (req, res, next) => {
         id: user._id,
         fullName: user.fullName,
         email: user.email,
+        ...departmentFieldsForUser(user),
       },
       role: toFrontendRole(user.role),
     });
@@ -347,6 +433,7 @@ const register = async (req, res, next) => {
         fullName: user.fullName,
         email: user.email,
         role: user.role,
+        ...departmentFieldsForUser(user),
       },
       role: 'employee',
       token: accessToken,
@@ -389,6 +476,7 @@ const kioskRegister = async (req, res, next) => {
         fullName: user.fullName,
         email: user.email,
         role: user.role,
+        ...departmentFieldsForUser(user),
       },
       role: 'kiosk_operator',
       token: accessToken,
