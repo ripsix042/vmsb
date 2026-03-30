@@ -49,6 +49,8 @@ const OKTA_REDIRECT_URI = process.env.OKTA_REDIRECT_URI;
 const OKTA_SCOPES = process.env.OKTA_SCOPES || 'openid profile email';
 const OKTA_POST_LOGIN_REDIRECT = process.env.OKTA_POST_LOGIN_REDIRECT || process.env.FRONTEND_URL || '';
 const OKTA_AUTO_PROVISION = process.env.OKTA_AUTO_PROVISION === 'true';
+/** When true, each Okta login updates local user.role to match intent (admin URL → Admin, host → Employee). Use only if Okta app assignment prevents abuse. */
+const OKTA_SYNC_ROLE_FROM_INTENT = process.env.OKTA_SYNC_ROLE_FROM_INTENT === 'true';
 /** Set `true` only if your IdP issuer intentionally has no `/oauth2/` segment (non-standard). */
 const OKTA_RELAX_ISSUER_CHECK = process.env.OKTA_RELAX_ISSUER_CHECK === 'true';
 
@@ -122,6 +124,7 @@ module.exports = {
   OKTA_SCOPES,
   OKTA_POST_LOGIN_REDIRECT,
   OKTA_AUTO_PROVISION,
+  OKTA_SYNC_ROLE_FROM_INTENT,
   OKTA_RELAX_ISSUER_CHECK,
   isDualOktaMode,
   getOktaClientCredentials,

@@ -33,6 +33,7 @@ const {
 const {
   OKTA_POST_LOGIN_REDIRECT,
   OKTA_AUTO_PROVISION,
+  OKTA_SYNC_ROLE_FROM_INTENT,
   isDualOktaMode,
   getOktaClientCredentials,
   oktaCookieOptions,
@@ -122,6 +123,13 @@ function clearOktaTransientCookies(res) {
 }
 
 /** OAuth/OIDC error or incomplete callback: send user back to SPA instead of JSON 400. */
+/** Local role from Okta login entry point (cookie set by /auth/okta/login?intent=…). */
+function roleFromOktaIntentCookie(oktaIntent) {
+  if (oktaIntent === 'admin') return ROLES.ADMIN;
+  if (oktaIntent === 'host') return ROLES.EMPLOYEE;
+  return ROLES.EMPLOYEE;
+}
+
 function redirectOktaFailure(res, { error, errorDescription }) {
   clearOktaTransientCookies(res);
   const code = error || 'okta_callback_failed';
@@ -156,6 +164,10 @@ const oktaLogin = async (req, res, next) => {
           message: 'This deployment uses separate Okta apps for admin and host. Use ?intent=admin or ?intent=host',
         });
       }
+    } else if (raw === 'admin') {
+      intentCookie = 'admin';
+    } else if (raw === 'host' || raw === 'employee') {
+      intentCookie = 'host';
     }
 
     const { clientId, clientSecret } = getOktaClientCredentials(intentCookie === 'legacy' ? 'legacy' : intentCookie);
@@ -261,15 +273,21 @@ const oktaCallback = async (req, res, next) => {
         email: normalizedEmail,
         // Not used for Okta users; required by schema. Use random value.
         passwordHash: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), PASSWORD.BCRYPT_ROUNDS),
-        role: ROLES.EMPLOYEE,
+        role: roleFromOktaIntentCookie(oktaIntent),
         status: USER_STATUS.ACTIVE,
       });
+    } else if (OKTA_SYNC_ROLE_FROM_INTENT && oktaIntent && oktaIntent !== 'legacy') {
+      const desired = roleFromOktaIntentCookie(oktaIntent);
+      if (user.role !== desired) {
+        user.role = desired;
+        await user.save();
+      }
     }
     if (user.status !== 'Active') {
       throw unauthorized('Account is inactive');
     }
 
-    if (isDualOktaMode()) {
+    if (isDualOktaMode() && !OKTA_SYNC_ROLE_FROM_INTENT) {
       if (oktaIntent === 'admin' && user.role !== ROLES.ADMIN) {
         throw unauthorized('This account is not an administrator. Use the host sign-in with Okta.');
       }
