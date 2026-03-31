@@ -54,6 +54,7 @@ const updateVisitorSchema = Joi.object({
   checkedInByUserId: Joi.string().allow(null, ''),
   checkedInBy: Joi.string().allow(null, ''),
   checked_in_by: Joi.string().allow(null, ''),
+  transition_reason: Joi.string().max(200).trim().allow(null, ''),
   signed_nda: Joi.boolean(),
   qr_used: Joi.boolean(),
 }).min(1);

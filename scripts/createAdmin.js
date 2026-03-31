@@ -48,7 +48,7 @@ async function run() {
   });
   console.log('Admin user created successfully.');
   if (isConfigured()) {
-    const { sent } = await sendWelcomeEmail(email.trim().toLowerCase(), fullName.trim(), password);
+    const { sent } = await sendWelcomeEmail(email.trim().toLowerCase(), fullName.trim());
     if (sent) console.log('Welcome email sent.');
     else console.log('Welcome email could not be sent (check SMTP config).');
   } else {

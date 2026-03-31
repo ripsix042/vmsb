@@ -14,7 +14,7 @@ const corsOrigins = (process.env.CORS_ORIGIN || '')
 const getCorsOrigin = () => {
   if (corsOrigins.length > 0) return corsOrigins;
   if (isProduction) return []; // force failure in prod if not set
-  return ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  return ['http://localhost:8080'];
 };
 
 /** Password policy (TRD: bcrypt cost ≥ 10; configurable complexity). */
@@ -53,7 +53,27 @@ const RATE_LIMITS = {
   refresh: { windowMs: 15 * 60 * 1000, max: 20 },
   otp: { windowMs: 15 * 60 * 1000, max: isProduction ? 3 : 10 },
   public: { windowMs: 1 * 60 * 1000, max: 60 },
+  visitorLookup: { windowMs: 1 * 60 * 1000, max: isProduction ? 30 : 120 },
   api: { windowMs: 15 * 60 * 1000, max: apiMax },
+};
+
+const LOGIN_LOCKOUT = {
+  maxFailedAttempts: Math.max(3, Number(process.env.LOGIN_MAX_FAILED_ATTEMPTS || 5)),
+  lockMs: Math.max(60 * 1000, Number(process.env.LOGIN_LOCK_MS || 15 * 60 * 1000)),
+};
+
+const CSRF = {
+  enabled: process.env.CSRF_ENABLED !== 'false',
+  cookieName: process.env.CSRF_COOKIE_NAME || 'csrfToken',
+  headerName: process.env.CSRF_HEADER_NAME || 'x-csrf-token',
+};
+
+const INVITES = {
+  ttlMinutes: Math.max(5, Number(process.env.INVITE_TTL_MINUTES || 60)),
+  redirectAllowlist: (process.env.INVITE_REDIRECT_ALLOWLIST || process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean),
 };
 
 /** Weak/default secrets that must not be used in production. */
@@ -83,5 +103,8 @@ module.exports = {
   COOKIE_NAME_REFRESH,
   COOKIE_OPTIONS,
   RATE_LIMITS,
+  LOGIN_LOCKOUT,
+  CSRF,
+  INVITES,
   isWeakJwtSecret,
 };

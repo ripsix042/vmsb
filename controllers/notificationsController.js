@@ -1,6 +1,7 @@
 const Notification = require('../models/Notification');
 const { notFound, forbidden, badRequest } = require('../utils/errors');
 const { ROLES } = require('../config/constants');
+const mongoose = require('mongoose');
 
 function notificationToApi(n) {
   const doc = n.toObject ? n.toObject() : n;
@@ -25,6 +26,7 @@ async function listNotifications(req, res, next) {
     let userId = req.user._id.toString();
     if (hostId) {
       if (!isAdmin) throw forbidden('Only admins can query notifications by hostId');
+      if (!mongoose.isValidObjectId(hostId)) throw badRequest('Invalid hostId');
       userId = hostId.toString();
     }
     const notifications = await Notification.find({ userId })
