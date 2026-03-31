@@ -19,6 +19,9 @@ const {
   kioskEnroll2FA,
   kioskLogin,
   verify2FA,
+  createInvite,
+  redeemInvite,
+  revokeInvite,
 } = require('../controllers/authController');
 const { validate } = require('../middleware/validate');
 const { authenticate } = require('../middleware/auth');
@@ -34,7 +37,12 @@ const {
   twoFactorVerifySchema,
   twoFactorEnableSchema,
   twoFactorDisableSchema,
+  createInviteSchema,
+  redeemInviteSchema,
+  revokeInviteSchema,
 } = require('../validators/auth');
+const { requireAdmin } = require('../middleware/roleCheck');
+const { requireStepUp } = require('../middleware/stepUp');
 const { RATE_LIMITS } = require('../config/security');
 const { issueCsrfToken, requireCsrf } = require('../middleware/csrf');
 
@@ -90,6 +98,9 @@ router.post('/login', loginLimiter, validate(loginSchema), login);
 router.get('/okta/login', oktaLogin);
 router.get('/okta/callback', oktaCallback);
 router.post('/register', requirePublicRegistrationEnabled, validate(registerSchema), register);
+router.post('/invites', authenticate, requireAdmin, validate(createInviteSchema), requireStepUp, createInvite);
+router.post('/invites/redeem', validate(redeemInviteSchema), redeemInvite);
+router.post('/invites/:inviteId/revoke', authenticate, requireAdmin, validate(revokeInviteSchema), requireStepUp, revokeInvite);
 router.get('/kiosk/operators', listKioskOperators);
 router.post('/kiosk/setup', kioskSetupLimiter, validate(kioskSetupSchema), kioskSetup);
 router.post('/kiosk/2fa/enroll', otpLimiter, validate(kioskEnrollSchema), kioskEnroll2FA);

@@ -26,10 +26,14 @@ const updateStaffRoleSchema = Joi.object({
   role: Joi.string()
     .required()
     .valid(ROLES.ADMIN, ROLES.EMPLOYEE, ROLES.KIOSK_OPERATOR),
+  step_up_password: Joi.string().required().max(PASSWORD.MAX_LENGTH),
+  step_up_code: Joi.string().length(6).optional(),
 });
 
 const updateStaffStatusSchema = Joi.object({
   isActive: Joi.boolean().required(),
+  step_up_password: Joi.string().required().max(PASSWORD.MAX_LENGTH),
+  step_up_code: Joi.string().length(6).optional(),
 });
 
 const setMyDepartmentSchema = Joi.object({

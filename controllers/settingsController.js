@@ -5,6 +5,7 @@ const Notification = require('../models/Notification');
 const AuditLog = require('../models/AuditLog');
 const { sanitizeForMongo } = require('../utils/sanitize');
 const { logAuditFromReq } = require('../services/auditLog');
+const { maskPiiDeep } = require('../utils/piiMask');
 
 const defaultSettings = {
   company_profile: {
@@ -83,7 +84,7 @@ async function getIntegrationSettings(req, res, next) {
       doc = doc.toObject();
     }
     const { _id, __v, createdAt, updatedAt, ...rest } = doc;
-    res.json(rest);
+    res.json(maskPiiDeep(rest));
   } catch (err) {
     next(err);
   }
@@ -104,7 +105,7 @@ async function updateIntegrationSettings(req, res, next) {
     await doc.save();
     const out = doc.toObject();
     const { _id, __v, createdAt, updatedAt, ...rest } = out;
-    res.json(rest);
+    res.json(maskPiiDeep(rest));
   } catch (err) {
     next(err);
   }

@@ -2,13 +2,15 @@ const mongoose = require('mongoose');
 const Visit = require('../models/Visit');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
-const { generateVisitId, generateQrToken } = require('../utils/visitId');
+const { generateVisitId, issueQrToken, verifyQrToken } = require('../utils/visitId');
 const { notFound, conflict, forbidden, badRequest } = require('../utils/errors');
 const { VISIT_STATUS, VISIT_TYPE } = require('../config/constants');
 const { ROLES } = require('../config/constants');
 const { emitToUser, emitGlobal } = require('../services/socket');
 const { logAuditFromReq } = require('../services/auditLog');
 const { sendCheckInNotificationToHost, isConfigured: isEmailConfigured } = require('../services/emailService');
+const { logSecurityEvent } = require('../services/securityLogger');
+const { assertVisitTransition } = require('../services/visitStateMachine');
 
 // Include legacy status values so older records still auto-expire.
 const EXPIRABLE_STATUSES = [
@@ -59,7 +61,10 @@ async function expireDueVisits(baseFilter = {}) {
     qr_used: true,
     qr_used_at: new Date(),
   };
-  return Visit.updateMany(buildDueExpiryFilter(baseFilter), { $set: update, $unset: { qr_token: 1 } });
+  return Visit.updateMany(buildDueExpiryFilter(baseFilter), {
+    $set: update,
+    $unset: { qr_token: 1, qr_jti: 1, qr_expires_at: 1 },
+  });
 }
 
 async function visitToApiVisitor(visit) {
@@ -95,6 +100,7 @@ async function visitToApiVisitor(visit) {
     checked_in_by: v.checkedInByUserId ? v.checkedInByUserId.toString() : null,
     checked_in_by_name: checkedInByName,
     qr_token: v.qr_token || null,
+    qr_expires_at: v.qr_expires_at || null,
     qr_used: !!v.qr_used,
     qr_used_at: v.qr_used_at || null,
     created_at: v.createdAt,
@@ -141,9 +147,17 @@ async function listVisitors(req, res, next) {
 
 async function createVisitor(req, res, next) {
   try {
+    const isAdmin = req.user.role === ROLES.ADMIN;
+    const isEmployee = req.user.role === ROLES.EMPLOYEE;
+    if (!isAdmin && !isEmployee) {
+      throw forbidden('Only admin and employee users can create visitors');
+    }
     const body = req.body;
     if (!mongoose.isValidObjectId(body.hostId)) throw badRequest('Invalid hostId');
     const hostId = new mongoose.Types.ObjectId(body.hostId);
+    if (!isAdmin && hostId.toString() !== req.user._id.toString()) {
+      throw forbidden('You can only create visitors for your own host profile');
+    }
     const visitorName = body.visitorName || body.name;
     const visitorEmail = body.visitorEmail || body.email;
     const visitorCompany = body.visitorCompany || body.company;
@@ -181,7 +195,6 @@ async function createVisitor(req, res, next) {
       }
     }
     const visit_id = body.visit_id || generateVisitId();
-    const qr_token = body.qr_token || generateQrToken();
 
     const visit = await Visit.create({
       visitorName,
@@ -196,8 +209,12 @@ async function createVisitor(req, res, next) {
       scheduledStart,
       scheduledEnd,
       visit_id,
-      qr_token,
     });
+    const qrIssued = issueQrToken({ visitId: visit._id.toString() });
+    visit.qr_token = qrIssued.token;
+    visit.qr_jti = qrIssued.jti;
+    visit.qr_expires_at = qrIssued.expiresAt;
+    await visit.save();
 
     const preRegCompanyPart = visitorCompany ? ` from ${visitorCompany}` : '';
     await Notification.create({
@@ -281,10 +298,29 @@ async function updateVisitor(req, res, next) {
       updates.checkedInByUserId = new mongoose.Types.ObjectId(updates.checkedInByUserId);
     }
 
-    const wasOnSite = visit.status === VISIT_STATUS.ON_SITE;
-    const newStatus = updates.status || visit.status;
+    const previousStatus = visit.status;
+    const wasOnSite = previousStatus === VISIT_STATUS.ON_SITE;
+    const newStatus = updates.status || previousStatus;
+    const transitionReason = typeof updates.transition_reason === 'string' ? updates.transition_reason.trim() : '';
+    assertVisitTransition({
+      currentStatus: previousStatus,
+      nextStatus: newStatus,
+      actorRole: req.user.role,
+      overrideReason: transitionReason,
+    });
     const isCheckIn = newStatus === VISIT_STATUS.ON_SITE && !wasOnSite;
     const isCheckout = newStatus === VISIT_STATUS.CHECKED_OUT;
+
+    const scheduleTouched = updates.scheduledStart !== undefined || updates.scheduledEnd !== undefined;
+    if (scheduleTouched) {
+      if (!isAdmin && !isHost) {
+        throw forbidden('Only the host or admin can update meeting schedule');
+      }
+      const visitHasStarted = !!(visit.scheduledStart && visit.scheduledStart.getTime() <= Date.now());
+      if (!isAdmin && visitHasStarted) {
+        throw conflict('Schedule cannot be changed after the meeting start time');
+      }
+    }
 
     if (isCheckIn) {
       if (visit.status === VISIT_STATUS.ON_SITE) {
@@ -295,6 +331,8 @@ async function updateVisitor(req, res, next) {
         visit.qr_used = true;
         visit.qr_used_at = new Date();
         visit.qr_token = undefined;
+        visit.qr_jti = undefined;
+        visit.qr_expires_at = undefined;
         await visit.save();
         emitGlobal('visitor_updated', {
           id: visit._id.toString(),
@@ -320,6 +358,8 @@ async function updateVisitor(req, res, next) {
       updates.qr_used_at = new Date();
       // Remove qr_token from the document so unique index doesn't collide on null values.
       updates.qr_token = undefined;
+      updates.qr_jti = undefined;
+      updates.qr_expires_at = undefined;
     }
 
     if (isCheckIn && !updates.checkInTime) updates.checkInTime = new Date();
@@ -372,7 +412,12 @@ async function updateVisitor(req, res, next) {
         action: 'visitor_check_in',
         resourceType: 'Visit',
         resourceId: visit._id.toString(),
-        metadata: { visitor_name: visit.visitorName, summary: `${visit.visitorName} checked in` },
+        metadata: {
+          visitor_name: visit.visitorName,
+          from_status: previousStatus,
+          to_status: VISIT_STATUS.ON_SITE,
+          summary: `${visit.visitorName} checked in`,
+        },
       }).catch(() => {});
     }
     if (isCheckout) {
@@ -380,7 +425,25 @@ async function updateVisitor(req, res, next) {
         action: 'visitor_check_out',
         resourceType: 'Visit',
         resourceId: visit._id.toString(),
-        metadata: { visitor_name: visit.visitorName, summary: `${visit.visitorName} checked out` },
+        metadata: {
+          visitor_name: visit.visitorName,
+          from_status: VISIT_STATUS.ON_SITE,
+          to_status: VISIT_STATUS.CHECKED_OUT,
+          summary: `${visit.visitorName} checked out`,
+        },
+      }).catch(() => {});
+    }
+    if (!isCheckIn && !isCheckout && newStatus !== previousStatus) {
+      logAuditFromReq(req, {
+        action: 'visitor_status_updated',
+        resourceType: 'Visit',
+        resourceId: visit._id.toString(),
+        metadata: {
+          from_status: previousStatus,
+          to_status: newStatus,
+          transition_reason: transitionReason || null,
+          summary: `Status changed to ${newStatus}`,
+        },
       }).catch(() => {});
     }
 
@@ -400,15 +463,48 @@ async function updateVisitor(req, res, next) {
 async function lookupVisitor(req, res, next) {
   try {
     const { visitId, qrToken } = req.query;
-    if (!visitId && !qrToken) throw notFound('Provide visitId or qrToken');
-    const filter = visitId ? { visit_id: visitId } : { qr_token: qrToken };
-    const visit = await Visit.findOne(filter);
-    if (!visit) throw notFound('Visitor not found');
+    if (!visitId && !qrToken) throw notFound('Code is no longer valid');
+    let visit = null;
+    if (qrToken) {
+      try {
+        const decoded = verifyQrToken(String(qrToken));
+        visit = await Visit.findById(decoded.visitId);
+        if (!visit || visit.qr_jti !== decoded.jti || visit.qr_used || !visit.qr_token) {
+          throw notFound('Code is no longer valid');
+        }
+      } catch (err) {
+        if (String(qrToken).startsWith('qr-')) {
+          visit = await Visit.findOne({ qr_token: String(qrToken) });
+          if (visit && !visit.qr_used) {
+            const visitor = await visitToApiVisitor(visit);
+            return res.json(visitor);
+          }
+        }
+        logSecurityEvent('visitor_lookup_failed', {
+          reason: 'invalid_qr',
+          userId: req.user?._id?.toString(),
+          lookup_mode: 'qr',
+        });
+        throw notFound('Code is no longer valid');
+      }
+    } else {
+      visit = await Visit.findOne({ visit_id: String(visitId).trim().toUpperCase() });
+      if (!visit) {
+        logSecurityEvent('visitor_lookup_failed', {
+          reason: 'invalid_visit_id',
+          userId: req.user?._id?.toString(),
+          lookup_mode: 'manual',
+        });
+        throw notFound('Code is no longer valid');
+      }
+    }
     if (shouldExpireVisit(visit)) {
       visit.status = VISIT_STATUS.EXPIRED;
       visit.qr_used = true;
       visit.qr_used_at = new Date();
       visit.qr_token = undefined;
+      visit.qr_jti = undefined;
+      visit.qr_expires_at = undefined;
       await visit.save();
       emitGlobal('visitor_updated', {
         id: visit._id.toString(),

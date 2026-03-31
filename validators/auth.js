@@ -102,6 +102,37 @@ const twoFactorDisableSchema = Joi.object({
     .messages({ 'string.empty': 'Password is required' }),
 });
 
+const createInviteSchema = Joi.object({
+  email: Joi.string()
+    .required()
+    .email({ tlds: { allow: false } })
+    .max(254)
+    .normalize()
+    .lowercase()
+    .messages({ 'string.empty': 'Email is required' }),
+  fullName: Joi.string().required().min(2).max(120).trim(),
+  role: Joi.string().required().valid('Admin', 'Employee', 'KioskOperator'),
+  redirect_url: Joi.string().uri().max(1000).optional(),
+  step_up_password: Joi.string().required().max(PASSWORD.MAX_LENGTH),
+  step_up_code: Joi.string().length(6).optional(),
+});
+
+const redeemInviteSchema = Joi.object({
+  token: Joi.string().required().trim(),
+  password: Joi.string()
+    .required()
+    .min(PASSWORD.MIN_LENGTH)
+    .max(PASSWORD.MAX_LENGTH)
+    .messages({ 'string.empty': 'Password is required' }),
+  phone: Joi.string().max(30).trim().allow(null, ''),
+});
+
+const revokeInviteSchema = Joi.object({
+  reason: Joi.string().max(200).trim().allow('', null),
+  step_up_password: Joi.string().required().max(PASSWORD.MAX_LENGTH),
+  step_up_code: Joi.string().length(6).optional(),
+});
+
 module.exports = {
   loginSchema,
   registerSchema,
@@ -114,4 +145,7 @@ module.exports = {
   twoFactorVerifySchema,
   twoFactorEnableSchema,
   twoFactorDisableSchema,
+  createInviteSchema,
+  redeemInviteSchema,
+  revokeInviteSchema,
 };

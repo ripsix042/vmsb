@@ -2,7 +2,12 @@ const AuditLog = require('../models/AuditLog');
 const Settings = require('../models/Settings');
 const { badRequest } = require('../utils/errors');
 const { escapeRegex } = require('../utils/sanitize');
-const { logAuditFromReq } = require('../services/auditLog');
+const {
+  logAuditFromReq,
+  verifyAuditChainIntegrity,
+  buildInsiderRiskReport,
+} = require('../services/auditLog');
+const { maskPiiDeep, maskEmail } = require('../utils/piiMask');
 
 function parseDateOrNull(value) {
   if (!value) return null;
@@ -43,6 +48,7 @@ function csvSafe(value) {
 
 async function listAuditLogs(req, res, next) {
   try {
+    const includeSensitive = String(req.query.include_sensitive || '').toLowerCase() === 'true';
     const filters = buildFilters(req.query);
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
@@ -60,9 +66,10 @@ async function listAuditLogs(req, res, next) {
       id: d._id.toString(),
       action: d.action,
       performed_by: d.userId ? d.userId._id.toString() : null,
+      performed_by_email: d.userId?.email ? (includeSensitive ? d.userId.email : maskEmail(d.userId.email)) : null,
       target_user_id: d.resourceType === 'User' ? d.resourceId : null,
       created_at: d.createdAt,
-      details: d.metadata,
+      details: includeSensitive ? d.metadata : maskPiiDeep(d.metadata),
       resource_type: d.resourceType,
       resource_id: d.resourceId,
     }));
@@ -74,6 +81,7 @@ async function listAuditLogs(req, res, next) {
 
 async function exportAuditLogsCsv(req, res, next) {
   try {
+    const includeSensitive = String(req.query.include_sensitive || '').toLowerCase() === 'true';
     const filters = buildFilters(req.query);
     const maxRows = Math.min(5000, Math.max(1, parseInt(req.query.max_rows, 10) || 2000));
     const docs = await AuditLog.find(filters)
@@ -86,10 +94,12 @@ async function exportAuditLogsCsv(req, res, next) {
     const rows = docs.map((d) => [
       d.createdAt ? new Date(d.createdAt).toISOString() : '',
       d.action || '',
-      d.userId?.email || d.userId?._id?.toString() || '',
+      includeSensitive
+        ? (d.userId?.email || d.userId?._id?.toString() || '')
+        : (d.userId?.email ? maskEmail(d.userId.email) : d.userId?._id?.toString() || ''),
       d.resourceType || '',
       d.resourceId || '',
-      d.metadata || '',
+      includeSensitive ? (d.metadata || '') : (maskPiiDeep(d.metadata) || ''),
     ]);
 
     const csv = [
@@ -139,4 +149,50 @@ async function purgeAuditLogs(req, res, next) {
   }
 }
 
-module.exports = { listAuditLogs, exportAuditLogsCsv, purgeAuditLogs };
+async function auditIntegrityCheck(req, res, next) {
+  try {
+    const maxEntries = Math.min(50000, Math.max(1, Number(req.query.max_entries) || 5000));
+    const result = await verifyAuditChainIntegrity({ limit: maxEntries });
+    logAuditFromReq(req, {
+      action: 'audit_logs_integrity_check',
+      resourceType: 'AuditLog',
+      metadata: {
+        checked: result.checked,
+        valid: result.valid,
+        issue_count: result.issues.length,
+        summary: 'Audit chain integrity verification executed',
+      },
+    }).catch(() => {});
+    return res.json(result);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function insiderRiskReport(req, res, next) {
+  try {
+    const windowDays = Math.max(1, Math.min(365, Number(req.query.window_days) || 30));
+    const readThreshold = Math.max(10, Number(req.query.read_threshold) || 200);
+    const report = await buildInsiderRiskReport({ sinceDays: windowDays, readThreshold });
+    logAuditFromReq(req, {
+      action: 'audit_logs_insider_report',
+      resourceType: 'AuditLog',
+      metadata: {
+        window_days: windowDays,
+        flagged_count: report.flagged_count,
+        summary: 'Generated insider-risk report',
+      },
+    }).catch(() => {});
+    return res.json(report);
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = {
+  listAuditLogs,
+  exportAuditLogsCsv,
+  purgeAuditLogs,
+  auditIntegrityCheck,
+  insiderRiskReport,
+};
