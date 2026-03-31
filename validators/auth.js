@@ -90,6 +90,18 @@ const twoFactorVerifySchema = Joi.object({
   code: Joi.string().required().length(6).messages({ 'string.empty': 'Code is required' }),
 });
 
+const twoFactorEnableSchema = Joi.object({
+  setupToken: Joi.string().required().trim().messages({ 'string.empty': 'setupToken is required' }),
+  code: Joi.string().required().length(6).messages({ 'string.empty': 'Code is required' }),
+});
+
+const twoFactorDisableSchema = Joi.object({
+  password: Joi.string()
+    .required()
+    .max(PASSWORD.MAX_LENGTH)
+    .messages({ 'string.empty': 'Password is required' }),
+});
+
 module.exports = {
   loginSchema,
   registerSchema,
@@ -100,4 +112,6 @@ module.exports = {
   kioskEnrollSchema,
   kioskLoginSchema,
   twoFactorVerifySchema,
+  twoFactorEnableSchema,
+  twoFactorDisableSchema,
 };

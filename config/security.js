@@ -56,6 +56,17 @@ const RATE_LIMITS = {
   api: { windowMs: 15 * 60 * 1000, max: apiMax },
 };
 
+const LOGIN_LOCKOUT = {
+  maxFailedAttempts: Math.max(3, Number(process.env.LOGIN_MAX_FAILED_ATTEMPTS || 5)),
+  lockMs: Math.max(60 * 1000, Number(process.env.LOGIN_LOCK_MS || 15 * 60 * 1000)),
+};
+
+const CSRF = {
+  enabled: process.env.CSRF_ENABLED !== 'false',
+  cookieName: process.env.CSRF_COOKIE_NAME || 'csrfToken',
+  headerName: process.env.CSRF_HEADER_NAME || 'x-csrf-token',
+};
+
 /** Weak/default secrets that must not be used in production. */
 const WEAK_JWT_SECRETS = [
   '',
@@ -83,5 +94,7 @@ module.exports = {
   COOKIE_NAME_REFRESH,
   COOKIE_OPTIONS,
   RATE_LIMITS,
+  LOGIN_LOCKOUT,
+  CSRF,
   isWeakJwtSecret,
 };

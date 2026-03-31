@@ -1,5 +1,10 @@
+const crypto = require('crypto');
 const AuditLog = require('../models/AuditLog');
 const { emitGlobal } = require('./socket');
+
+function computeAuditEntryHash(payload) {
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
 
 /**
  * Write an audit log entry. Call from controllers after sensitive actions.
@@ -22,6 +27,21 @@ async function logAudit(options) {
     ipAddress = null,
     userAgent = null,
   } = options;
+  const last = await AuditLog.findOne().sort({ createdAt: -1, _id: -1 }).select('entryHash').lean();
+  const prevHash = last?.entryHash || null;
+  const hashPayload = {
+    userId: userId?.toString() || null,
+    action,
+    resourceType,
+    resourceId,
+    metadata,
+    ipAddress,
+    userAgent,
+    prevHash,
+    ts: new Date().toISOString(),
+  };
+  const entryHash = computeAuditEntryHash(hashPayload);
+
   const doc = await AuditLog.create({
     userId,
     action,
@@ -30,6 +50,8 @@ async function logAudit(options) {
     metadata,
     ipAddress,
     userAgent,
+    prevHash,
+    entryHash,
   });
   emitGlobal('audit_log_new', {
     id: doc._id.toString(),

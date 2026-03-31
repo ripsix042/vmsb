@@ -7,6 +7,9 @@ const {
   refresh,
   logout,
   me,
+  twoFactorSetup,
+  twoFactorEnable,
+  twoFactorDisable,
   register,
   kioskRegister,
   otpSend,
@@ -29,8 +32,11 @@ const {
   kioskEnrollSchema,
   kioskLoginSchema,
   twoFactorVerifySchema,
+  twoFactorEnableSchema,
+  twoFactorDisableSchema,
 } = require('../validators/auth');
 const { RATE_LIMITS } = require('../config/security');
+const { issueCsrfToken, requireCsrf } = require('../middleware/csrf');
 
 const router = express.Router();
 const allowPublicRegistration =
@@ -79,6 +85,7 @@ const kioskSetupLimiter = rateLimit({
 });
 
 router.get('/me', authenticate, me);
+router.get('/csrf-token', issueCsrfToken);
 router.post('/login', loginLimiter, validate(loginSchema), login);
 router.get('/okta/login', oktaLogin);
 router.get('/okta/callback', oktaCallback);
@@ -88,10 +95,13 @@ router.post('/kiosk/setup', kioskSetupLimiter, validate(kioskSetupSchema), kiosk
 router.post('/kiosk/2fa/enroll', otpLimiter, validate(kioskEnrollSchema), kioskEnroll2FA);
 router.post('/kiosk/login', loginLimiter, validate(kioskLoginSchema), kioskLogin);
 router.post('/2fa/verify', otpLimiter, validate(twoFactorVerifySchema), verify2FA);
+router.post('/2fa/setup', authenticate, twoFactorSetup);
+router.post('/2fa/enable', authenticate, otpLimiter, validate(twoFactorEnableSchema), twoFactorEnable);
+router.post('/2fa/disable', authenticate, requireCsrf, validate(twoFactorDisableSchema), twoFactorDisable);
 router.post('/kiosk/register', requirePublicRegistrationEnabled, validate(kioskRegisterSchema), kioskRegister);
 router.post('/otp/send', otpLimiter, validate(otpSendSchema), otpSend);
 router.post('/otp/verify', otpLimiter, validate(otpVerifySchema), otpVerify);
-router.post('/refresh', refreshLimiter, refresh);
-router.post('/logout', authenticate, logout);
+router.post('/refresh', refreshLimiter, requireCsrf, refresh);
+router.post('/logout', authenticate, requireCsrf, logout);
 
 module.exports = router;

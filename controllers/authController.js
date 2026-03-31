@@ -11,6 +11,7 @@ const {
   USE_HTTPONLY_COOKIE,
   COOKIE_NAME_REFRESH,
   COOKIE_OPTIONS,
+  LOGIN_LOCKOUT,
   PASSWORD,
 } = require('../config/security');
 const {
@@ -87,6 +88,43 @@ function createAccessPayload(user) {
     },
     role: toFrontendRole(user.role),
   };
+}
+
+function isMfaEligibleRole(role) {
+  return role === ROLES.ADMIN || role === ROLES.EMPLOYEE;
+}
+
+function isAccountLocked(user) {
+  return !!(user?.lockUntil && user.lockUntil.getTime() > Date.now());
+}
+
+function lockoutRemainingMs(user) {
+  if (!isAccountLocked(user)) return 0;
+  return Math.max(0, user.lockUntil.getTime() - Date.now());
+}
+
+async function resetFailedLogins(userId) {
+  await User.updateOne(
+    { _id: userId },
+    { $set: { failedLoginAttempts: 0, lockUntil: null, lastFailedLoginAt: null } }
+  );
+}
+
+async function registerFailedLogin(user, req, identifier, reason) {
+  const nextAttempts = (Number(user.failedLoginAttempts || 0) || 0) + 1;
+  const shouldLock = nextAttempts >= LOGIN_LOCKOUT.maxFailedAttempts;
+  const lockUntil = shouldLock ? new Date(Date.now() + LOGIN_LOCKOUT.lockMs) : null;
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        failedLoginAttempts: nextAttempts,
+        lastFailedLoginAt: new Date(),
+        lockUntil,
+      },
+    }
+  );
+  logLoginFailure(req, reason, identifier);
 }
 
 async function attachRefreshToPayload(payload, user, req, res) {
@@ -286,6 +324,7 @@ const oktaCallback = async (req, res, next) => {
     if (user.status !== 'Active') {
       throw unauthorized('Account is inactive');
     }
+    await resetFailedLogins(user._id);
 
     if (isDualOktaMode() && !OKTA_SYNC_ROLE_FROM_INTENT) {
       if (oktaIntent === 'admin' && user.role !== ROLES.ADMIN) {
@@ -340,14 +379,33 @@ const login = async (req, res, next) => {
       logLoginFailure(req, 'user_not_found', identifier);
       throw unauthorized('Invalid email or password');
     }
+    if (isAccountLocked(user)) {
+      logLoginFailure(req, 'account_locked', identifier);
+      throw unauthorized(`Account is locked. Try again in ${Math.ceil(lockoutRemainingMs(user) / 60000)} minute(s)`);
+    }
     const valid = await user.comparePassword(password);
     if (!valid) {
-      logLoginFailure(req, 'invalid_password', identifier);
+      await registerFailedLogin(user, req, identifier, 'invalid_password');
       throw unauthorized('Invalid email or password');
     }
     if (user.status !== 'Active') {
       logLoginFailure(req, 'account_inactive', identifier);
       throw unauthorized('Account is inactive');
+    }
+    await resetFailedLogins(user._id);
+
+    if (isMfaEligibleRole(user.role) && user.twoFactorEnabled && user.twoFactorSecret) {
+      const tempToken = setTempSession(user._id.toString());
+      logAudit({
+        userId: user._id,
+        action: 'login_challenge',
+        resourceType: 'User',
+        resourceId: user._id.toString(),
+        metadata: { summary: 'Login awaiting 2FA', role: toFrontendRole(user.role) },
+        ipAddress: req.ip || req.connection?.remoteAddress,
+        userAgent: req.get('user-agent'),
+      }).catch(() => {});
+      return res.json({ requires2FA: true, tempToken });
     }
 
     const accessToken = jwt.sign(
@@ -418,6 +476,107 @@ const me = async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+};
+
+/**
+ * POST /auth/2fa/setup
+ * Requires auth. Admin/Employee only.
+ */
+const twoFactorSetup = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (!isMfaEligibleRole(user.role)) {
+      throw unauthorized('2FA setup is available only for admin and employee accounts');
+    }
+    const secret = generateSecret();
+    const setupToken = setSetupSession(user._id.toString(), secret);
+    const qrCodeUrl = buildOtpAuthUrl({
+      secret,
+      accountName: user.email || user.fullName || 'Kora user',
+      issuer: 'Kora VMS',
+    });
+    logAudit({
+      userId: user._id,
+      action: '2fa_setup_started',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: '2FA setup started' },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+    return res.json({ setupToken, secret, qrCodeUrl });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * POST /auth/2fa/enable
+ * Requires auth. Body: { setupToken, code }
+ */
+const twoFactorEnable = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (!isMfaEligibleRole(user.role)) {
+      throw unauthorized('2FA is available only for admin and employee accounts');
+    }
+    const { setupToken, code } = req.body;
+    const setup = getSetupSession(setupToken);
+    if (!setup || setup.userId !== user._id.toString()) {
+      throw unauthorized('Setup token is invalid or expired');
+    }
+    if (!verifyCode(setup.secret, code)) throw badRequest('Invalid 2FA code');
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { twoFactorSecret: setup.secret, twoFactorEnabled: true } }
+    );
+    clearSetupSession(setupToken);
+    logAudit({
+      userId: user._id,
+      action: '2fa_enabled',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: '2FA enabled' },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+    return res.json({ success: true, enabled: true });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * POST /auth/2fa/disable
+ * Requires auth. Body: { password }.
+ */
+const twoFactorDisable = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select('+passwordHash');
+    if (!user) throw unauthorized('User not found');
+    if (!isMfaEligibleRole(user.role)) {
+      throw unauthorized('2FA is available only for admin and employee accounts');
+    }
+    const { password } = req.body;
+    const valid = await user.comparePassword(password);
+    if (!valid) throw unauthorized('Invalid password');
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { twoFactorEnabled: false, twoFactorSecret: null } }
+    );
+    logAudit({
+      userId: user._id,
+      action: '2fa_disabled',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: '2FA disabled' },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+    return res.json({ success: true, enabled: false });
+  } catch (err) {
+    return next(err);
   }
 };
 
@@ -611,9 +770,16 @@ const kioskLogin = async (req, res, next) => {
       role: ROLES.KIOSK_OPERATOR,
     }).select('+passwordHash +twoFactorSecret');
     if (!user) throw unauthorized('Invalid operator or password');
+    if (isAccountLocked(user)) {
+      throw unauthorized(`Account is locked. Try again in ${Math.ceil(lockoutRemainingMs(user) / 60000)} minute(s)`);
+    }
     if (user.status !== USER_STATUS.ACTIVE) throw unauthorized('Account is inactive');
     const valid = await user.comparePassword(password);
-    if (!valid) throw unauthorized('Invalid operator or password');
+    if (!valid) {
+      await registerFailedLogin(user, req, String(operatorId), 'invalid_password');
+      throw unauthorized('Invalid operator or password');
+    }
+    await resetFailedLogins(user._id);
 
     if (user.twoFactorEnabled && user.twoFactorSecret) {
       const tempToken = setTempSession(user._id.toString());
@@ -820,6 +986,9 @@ module.exports = {
   refresh,
   logout,
   me,
+  twoFactorSetup,
+  twoFactorEnable,
+  twoFactorDisable,
   register,
   kioskRegister,
   otpSend,
