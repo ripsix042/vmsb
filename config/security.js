@@ -14,7 +14,7 @@ const corsOrigins = (process.env.CORS_ORIGIN || '')
 const getCorsOrigin = () => {
   if (corsOrigins.length > 0) return corsOrigins;
   if (isProduction) return []; // force failure in prod if not set
-  return ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  return ['http://localhost:8080'];
 };
 
 /** Password policy (TRD: bcrypt cost ≥ 10; configurable complexity). */

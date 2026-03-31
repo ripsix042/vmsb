@@ -18,9 +18,14 @@ if (uri && fs.existsSync(envPath)) {
       }
     }
   }
+  process.env.MONGODB_URI = uri;
+} else {
+  require('dotenv').config();
 }
+
+// let uri = process.env.MONGODB_URI;
 if (!uri || !uri.trim()) {
-  console.error('MONGODB_URI is not set. Add it to .env or set the variable in your host (e.g. Render).');
+  console.error('MONGODB_URI is not set. Set it in .env (local) or in Environment Variables (e.g. Render dashboard).');
   process.exit(1);
 }
 if (!uri.startsWith('mongodb+srv://') && !uri.startsWith('mongodb://')) {
@@ -35,7 +40,7 @@ if (process.env.NODE_ENV === 'production' && (uri.includes('localhost') || uri.i
 const { isWeakJwtSecret } = require('./config/security');
 const jwtSecret = process.env.JWT_SECRET;
 if (!jwtSecret || !jwtSecret.trim()) {
-  console.error('JWT_SECRET is not set. Add it to .env or set the variable in your host (e.g. Render).');
+  console.error('JWT_SECRET is not set. Set it in .env (local) or in Environment Variables (e.g. Render dashboard).');
   process.exit(1);
 }
 if (process.env.NODE_ENV === 'production' && isWeakJwtSecret(jwtSecret)) {

@@ -2,6 +2,8 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const {
   login,
+  oktaLogin,
+  oktaCallback,
   refresh,
   logout,
   me,
@@ -78,6 +80,8 @@ const kioskSetupLimiter = rateLimit({
 
 router.get('/me', authenticate, me);
 router.post('/login', loginLimiter, validate(loginSchema), login);
+router.get('/okta/login', oktaLogin);
+router.get('/okta/callback', oktaCallback);
 router.post('/register', requirePublicRegistrationEnabled, validate(registerSchema), register);
 router.get('/kiosk/operators', listKioskOperators);
 router.post('/kiosk/setup', kioskSetupLimiter, validate(kioskSetupSchema), kioskSetup);
