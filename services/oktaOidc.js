@@ -1,12 +1,6 @@
+const crypto = require('crypto');
 const {
-  discovery,
-  buildAuthorizationUrl,
-  authorizationCodeGrant,
-  randomPKCECodeVerifier,
-  calculatePKCECodeChallenge,
-  randomNonce,
-  randomState,
-  fetchUserInfo,
+  Issuer,
 } = require('openid-client');
 const {
   OKTA_ISSUER,
@@ -15,8 +9,33 @@ const {
   assertOktaEnvPresent,
 } = require('../config/okta');
 
-/** @type {Map<string, Promise<unknown>>} */
+/** @type {Map<string, Promise<import('openid-client').Client>>} */
 const configCache = new Map();
+
+function base64url(buffer) {
+  return Buffer.from(buffer)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function randomState() {
+  return base64url(crypto.randomBytes(32));
+}
+
+function randomNonce() {
+  return base64url(crypto.randomBytes(32));
+}
+
+function randomPKCECodeVerifier() {
+  // RFC 7636 code_verifier allows 43-128 chars from unreserved set.
+  return base64url(crypto.randomBytes(64));
+}
+
+async function calculatePKCECodeChallenge(codeVerifier) {
+  return base64url(crypto.createHash('sha256').update(codeVerifier).digest());
+}
 
 function wrapDiscoveryError(err) {
   const status = err?.cause?.status ?? err?.response?.status;
@@ -39,18 +58,23 @@ async function getOktaConfig(clientId, clientSecret) {
   assertOktaEnvPresent();
   const key = `${OKTA_ISSUER}|${clientId}`;
   if (!configCache.has(key)) {
-    const p = discovery(new URL(OKTA_ISSUER), clientId, clientSecret || undefined).catch((err) => {
-      configCache.delete(key);
-      throw wrapDiscoveryError(err);
-    });
+    const p = Issuer.discover(OKTA_ISSUER)
+      .then((issuer) => new issuer.Client({
+        client_id: clientId,
+        client_secret: clientSecret || undefined,
+      }))
+      .catch((err) => {
+        configCache.delete(key);
+        throw wrapDiscoveryError(err);
+      });
     configCache.set(key, p);
   }
   return configCache.get(key);
 }
 
 async function buildLoginUrl({ state, nonce, codeChallenge, clientId, clientSecret }) {
-  const config = await getOktaConfig(clientId, clientSecret);
-  const url = buildAuthorizationUrl(config, {
+  const client = await getOktaConfig(clientId, clientSecret);
+  const url = client.authorizationUrl({
     redirect_uri: OKTA_REDIRECT_URI,
     scope: OKTA_SCOPES,
     response_type: 'code',
@@ -70,22 +94,26 @@ async function exchangeCodeForTokens({
   clientId,
   clientSecret,
 }) {
-  const config = await getOktaConfig(clientId, clientSecret);
-  const tokens = await authorizationCodeGrant(
-    config,
-    currentUrl,
-    { pkceCodeVerifier, expectedState, expectedNonce }
+  const client = await getOktaConfig(clientId, clientSecret);
+  const params = currentUrl instanceof URL
+    ? Object.fromEntries(currentUrl.searchParams.entries())
+    : currentUrl;
+  const tokens = await client.callback(
+    OKTA_REDIRECT_URI,
+    params,
+    {
+      state: expectedState,
+      nonce: expectedNonce,
+      code_verifier: pkceCodeVerifier,
+    }
   );
   return tokens;
 }
 
 async function getUserInfo(tokens, clientId, clientSecret) {
-  const config = await getOktaConfig(clientId, clientSecret);
+  const client = await getOktaConfig(clientId, clientSecret);
   if (!tokens?.access_token) return null;
-  const claims = typeof tokens?.claims === 'function' ? tokens.claims() : null;
-  const expectedSubject = claims && typeof claims.sub === 'string' ? claims.sub : null;
-  if (!expectedSubject) return null;
-  return fetchUserInfo(config, tokens.access_token, expectedSubject);
+  return client.userinfo(tokens.access_token);
 }
 
 module.exports = {
