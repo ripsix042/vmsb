@@ -28,9 +28,8 @@ const getHosts = async (req, res, next) => {
     const hosts = users.map((u) => ({
       id: u._id.toString(),
       name: u.fullName,
-      email: u.email,
+      // Minimize PII in public host directory.
       department: 'Staff',
-      phone: u.phone || undefined,
     }));
     res.json({ hosts });
   } catch (err) {

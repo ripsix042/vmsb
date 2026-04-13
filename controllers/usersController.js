@@ -65,6 +65,12 @@ async function setMyDepartment(req, res, next) {
       { new: true, runValidators: true }
     ).select('-passwordHash');
     if (!updated) throw notFound('User not found');
+    logAuditFromReq(req, {
+      action: 'set_department',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { department_id: dept._id.toString(), department_name: dept.name, summary: 'Department set' },
+    }).catch(() => {});
     res.json(userToProfile(updated));
   } catch (err) {
     next(err);
@@ -92,6 +98,11 @@ async function updateMe(req, res, next) {
 async function getProfileById(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.userId)) throw badRequest('Invalid userId');
+    const requesterId = req.user?._id?.toString();
+    const isAdmin = req.user?.role === ROLES.ADMIN;
+    if (!isAdmin && requesterId !== req.params.userId) {
+      throw forbidden('You can only view your own profile');
+    }
     const user = await User.findById(req.params.userId).select('-passwordHash');
     if (!user) {
       // Keep historical references renderable (e.g. checked_in_by on old visits).

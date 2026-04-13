@@ -1,0 +1,827 @@
+{
+  "info": {
+    "name": "Kora VMS Backend API",
+    "_postman_id": "4cb0508e-822a-4ba0-a0af-b1dc4e8d5b9a",
+    "description": "Full backend API collection with raw JSON bodies for all endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5050/api/v1" },
+    { "key": "token", "value": "" },
+    { "key": "csrfToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "inviteId", "value": "" },
+    { "key": "inviteToken", "value": "" },
+    { "key": "operatorId", "value": "" },
+    { "key": "setupToken", "value": "" },
+    { "key": "tempToken", "value": "" },
+    { "key": "hostId", "value": "" },
+    { "key": "visitId", "value": "" },
+    { "key": "userId", "value": "" },
+    { "key": "departmentId", "value": "" },
+    { "key": "notificationId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Get Me",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/auth/me"
+          }
+        },
+        {
+          "name": "Get CSRF Token",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/auth/csrf-token"
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@company.com\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Okta Login",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/auth/okta/login?intent=admin"
+          }
+        },
+        {
+          "name": "Okta Callback",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/auth/okta/callback"
+          }
+        },
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff@company.com\",\n  \"fullName\": \"Staff User\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/register"
+          }
+        },
+        {
+          "name": "Create Invite",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"new.user@company.com\",\n  \"fullName\": \"New User\",\n  \"role\": \"Employee\",\n  \"redirect_url\": \"https://your-app.com/signup\",\n  \"step_up_password\": \"AdminPassword123!\",\n  \"step_up_code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/invites"
+          }
+        },
+        {
+          "name": "Redeem Invite",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{inviteToken}}\",\n  \"password\": \"StrongPassword123!\",\n  \"phone\": \"+2348000000000\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/invites/redeem"
+          }
+        },
+        {
+          "name": "Revoke Invite",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Wrong email\",\n  \"step_up_password\": \"AdminPassword123!\",\n  \"step_up_code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/invites/{{inviteId}}/revoke"
+          }
+        },
+        {
+          "name": "List Kiosk Operators",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/auth/kiosk/operators"
+          }
+        },
+        {
+          "name": "Kiosk Setup",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"operatorId\": \"{{operatorId}}\",\n  \"password\": \"KioskPassword123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/kiosk/setup"
+          }
+        },
+        {
+          "name": "Kiosk 2FA Enroll",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"setupToken\": \"{{setupToken}}\",\n  \"code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/kiosk/2fa/enroll"
+          }
+        },
+        {
+          "name": "Kiosk Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"operatorId\": \"{{operatorId}}\",\n  \"password\": \"KioskPassword123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/kiosk/login"
+          }
+        },
+        {
+          "name": "2FA Verify",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tempToken\": \"{{tempToken}}\",\n  \"code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/2fa/verify"
+          }
+        },
+        {
+          "name": "2FA Setup",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/auth/2fa/setup"
+          }
+        },
+        {
+          "name": "2FA Enable",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"setupToken\": \"{{setupToken}}\",\n  \"code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/2fa/enable"
+          }
+        },
+        {
+          "name": "2FA Disable",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "x-csrf-token", "value": "{{csrfToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"CurrentPassword123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/2fa/disable"
+          }
+        },
+        {
+          "name": "Kiosk Register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"08030000000\",\n  \"fullName\": \"Kiosk Operator\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/kiosk/register"
+          }
+        },
+        {
+          "name": "OTP Send",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+2348000000000\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/send"
+          }
+        },
+        {
+          "name": "OTP Verify",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+2348000000000\",\n  \"code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/verify"
+          }
+        },
+        {
+          "name": "Refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-csrf-token", "value": "{{csrfToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "x-csrf-token", "value": "{{csrfToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Departments",
+      "item": [
+        {
+          "name": "List Departments",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/departments"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/users/me"
+          }
+        },
+        {
+          "name": "Set My Department",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departmentId\": \"{{departmentId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/users/me/department"
+          }
+        },
+        {
+          "name": "Update Me",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Updated Name\",\n  \"phone\": \"+2348000000000\"\n}"
+            },
+            "url": "{{baseUrl}}/users/me"
+          }
+        },
+        {
+          "name": "List Hosts",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/users/hosts"
+          }
+        },
+        {
+          "name": "List Staff",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/users/staff"
+          }
+        },
+        {
+          "name": "Create Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff2@company.com\",\n  \"fullName\": \"Staff Two\",\n  \"password\": \"Password123!\",\n  \"role\": \"Employee\",\n  \"phone\": \"+2348000000000\"\n}"
+            },
+            "url": "{{baseUrl}}/users/staff"
+          }
+        },
+        {
+          "name": "Get Profile By UserId",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/users/{{userId}}/profile"
+          }
+        },
+        {
+          "name": "Update Staff Role",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"Admin\",\n  \"step_up_password\": \"AdminPassword123!\",\n  \"step_up_code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/users/staff/{{userId}}/role"
+          }
+        },
+        {
+          "name": "Update Staff Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": true,\n  \"step_up_password\": \"AdminPassword123!\",\n  \"step_up_code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/users/staff/{{userId}}/status"
+          }
+        },
+        {
+          "name": "Delete Staff",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"step_up_password\": \"AdminPassword123!\",\n  \"step_up_code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/users/staff/{{userId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Visit Requests",
+      "item": [
+        {
+          "name": "Create Visit Request",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Visitor Name\",\n  \"email\": \"visitor@mail.com\",\n  \"company\": \"Visitor Co\",\n  \"phone\": \"+2348000000000\",\n  \"reason\": \"Business meeting\",\n  \"notes\": \"Optional notes\",\n  \"host_id\": \"{{hostId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/visit-requests"
+          }
+        },
+        {
+          "name": "List Visit Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/visit-requests"
+          }
+        },
+        {
+          "name": "Update Visit Request",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"approved\"\n}" },
+            "url": "{{baseUrl}}/visit-requests/{{visitId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Visitors",
+      "item": [
+        {
+          "name": "Lookup Visitor By VisitId",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/visitors/lookup?visitId=ABC123"
+          }
+        },
+        {
+          "name": "Lookup Visitor By QR Token",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/visitors/lookup?qrToken={{inviteToken}}"
+          }
+        },
+        {
+          "name": "List Visitors",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/visitors"
+          }
+        },
+        {
+          "name": "Create Visitor",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"visitorName\": \"Jane Visitor\",\n  \"visitorEmail\": \"jane@visitor.com\",\n  \"visitorCompany\": \"Visitor Co\",\n  \"visitorPhone\": \"+2348000000000\",\n  \"hostId\": \"{{hostId}}\",\n  \"reason\": \"Product demo\",\n  \"additionalNotes\": \"Optional\",\n  \"visitType\": \"pre_registered\",\n  \"status\": \"scheduled\",\n  \"scheduledStart\": \"2026-04-01T09:00:00.000Z\",\n  \"scheduledEnd\": \"2026-04-01T10:00:00.000Z\"\n}"
+            },
+            "url": "{{baseUrl}}/visitors"
+          }
+        },
+        {
+          "name": "Update Visitor",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"on_site\",\n  \"transition_reason\": \"Arrived at gate\"\n}"
+            },
+            "url": "{{baseUrl}}/visitors/{{visitId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "List Notifications",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/notifications"
+          }
+        },
+        {
+          "name": "Create Notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"check-in\",\n  \"title\": \"Visitor checked in\",\n  \"body\": \"Jane Visitor has checked in.\",\n  \"message\": \"Jane Visitor has checked in.\",\n  \"visitor_id\": \"{{visitId}}\",\n  \"host_id\": \"{{hostId}}\",\n  \"read\": false\n}"
+            },
+            "url": "{{baseUrl}}/notifications"
+          }
+        },
+        {
+          "name": "Mark All Notifications Read",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/notifications/read-all"
+          }
+        },
+        {
+          "name": "Mark Notification Read",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/notifications/{{notificationId}}/read"
+          }
+        },
+        {
+          "name": "Clear Notifications",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/notifications"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Settings",
+      "item": [
+        {
+          "name": "Get Settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/settings"
+          }
+        },
+        {
+          "name": "Update Settings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company_profile\": {\n    \"name\": \"Kora\",\n    \"address\": \"Lagos\",\n    \"phone\": \"+2348000000000\",\n    \"timezone\": \"Africa/Lagos\"\n  },\n  \"visitor_policy\": {\n    \"auto_checkout_enabled\": true,\n    \"auto_checkout_time\": \"18:00\",\n    \"max_visit_duration\": 480,\n    \"walk_in_policy\": \"require_approval\"\n  },\n  \"notification_settings\": {\n    \"email_enabled\": true,\n    \"in_app_enabled\": true,\n    \"notification_timing\": \"immediate\",\n    \"daily_summary\": false,\n    \"daily_summary_send_to_admins\": true,\n    \"daily_summary_recipients\": []\n  },\n  \"compliance_settings\": {\n    \"require_nda\": false,\n    \"require_photo\": false,\n    \"require_id\": false,\n    \"data_retention_days\": 365\n  },\n  \"appearance\": {\n    \"primary_color\": \"#0EA5E9\",\n    \"welcome_message\": \"Welcome\",\n    \"checkin_success_message\": \"Checked in\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/settings"
+          }
+        },
+        {
+          "name": "Retention Purge",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"retention_days\": 365,\n  \"step_up_password\": \"AdminPassword123!\",\n  \"step_up_code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/settings/retention/purge"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Integration Settings",
+      "item": [
+        {
+          "name": "Get Integration Settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/integration-settings"
+          }
+        },
+        {
+          "name": "Update Integration Settings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": {\n    \"enabled\": true,\n    \"from_name\": \"Kora VMS\",\n    \"from_email\": \"noreply@company.com\"\n  },\n  \"slack\": {\n    \"enabled\": false,\n    \"webhook_url\": \"\",\n    \"channel_name\": \"\",\n    \"notify_on_checkin\": true,\n    \"notify_on_walkin\": true\n  },\n  \"google_calendar\": {\n    \"enabled\": false,\n    \"sync_interval_minutes\": 30,\n    \"auto_create_visitors\": true\n  },\n  \"outlook\": {\n    \"enabled\": false,\n    \"client_id\": \"\",\n    \"tenant_id\": \"\",\n    \"redirect_uri\": \"\"\n  },\n  \"badge_printer\": {\n    \"enabled\": false,\n    \"printer_ip\": \"\",\n    \"printer_port\": 631,\n    \"print_on_checkin\": true\n  },\n  \"door_access\": {\n    \"enabled\": false,\n    \"webhook_url\": \"\",\n    \"api_key\": \"\",\n    \"unlock_duration_seconds\": 10\n  },\n  \"hr_sync\": {\n    \"enabled\": false\n  },\n  \"crm\": {\n    \"enabled\": false,\n    \"provider\": \"custom\",\n    \"webhook_url\": \"\",\n    \"api_key\": \"\",\n    \"sync_on_checkin\": true,\n    \"sync_on_checkout\": true\n  },\n  \"analytics_export\": {\n    \"enabled\": true\n  }\n}"
+            },
+            "url": "{{baseUrl}}/integration-settings"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit Logs",
+      "item": [
+        {
+          "name": "List Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/audit-logs"
+          }
+        },
+        {
+          "name": "Audit Chain Integrity",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/audit-logs/integrity"
+          }
+        },
+        {
+          "name": "Insider Risk Report",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/audit-logs/insider-report"
+          }
+        },
+        {
+          "name": "Export Audit Logs CSV",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/audit-logs/export.csv"
+          }
+        },
+        {
+          "name": "Purge Audit Logs",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"retention_days\": 365,\n  \"step_up_password\": \"AdminPassword123!\",\n  \"step_up_code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/audit-logs/purge"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Public",
+      "item": [
+        {
+          "name": "Get Reasons",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/reasons"
+          }
+        },
+        {
+          "name": "Get Hosts",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/hosts"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "http://localhost:5050/health"
+          }
+        }
+      ]
+    }
+  ]
+}

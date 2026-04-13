@@ -1,11 +1,13 @@
 const mongoose = require('mongoose');
 const Visit = require('../models/Visit');
 const Notification = require('../models/Notification');
+const User = require('../models/User');
 const { generateVisitId } = require('../utils/visitId');
 const { notFound, forbidden, badRequest } = require('../utils/errors');
 const { VISIT_TYPE, VISIT_STATUS } = require('../config/constants');
 const { ROLES } = require('../config/constants');
 const { emitToUser } = require('../services/socket');
+const { assertVisitTransition } = require('../services/visitStateMachine');
 
 function visitToApiRequest(visit) {
   const v = visit.toObject ? visit.toObject() : visit;
@@ -28,6 +30,10 @@ async function createVisitRequest(req, res, next) {
     const { name, email, company, phone, reason, notes, host_id } = req.body;
     if (!mongoose.isValidObjectId(host_id)) throw badRequest('Invalid host_id');
     const hostId = new mongoose.Types.ObjectId(host_id);
+    const host = await User.findById(hostId).select('status');
+    if (!host || host.status !== 'Active') {
+      throw notFound('Host not available');
+    }
     const visitId = generateVisitId();
     const visit = await Visit.create({
       visitorName: name,
@@ -96,6 +102,12 @@ async function updateVisitRequest(req, res, next) {
     if (visit.status !== VISIT_STATUS.PENDING_APPROVAL) {
       throw forbidden('This request has already been processed');
     }
+    assertVisitTransition({
+      currentStatus: visit.status,
+      nextStatus: status,
+      actorRole: req.user.role,
+      overrideReason: null,
+    });
     visit.status = status;
     await visit.save();
     res.json(visitToApiRequest(visit));

@@ -2,11 +2,11 @@ const express = require('express');
 const {
   getSettings,
   updateSettings,
-  getIntegrationSettings,
-  updateIntegrationSettings,
+  purgeRetentionData,
 } = require('../controllers/settingsController');
 const { authenticate } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/roleCheck');
+const { requireStepUp } = require('../middleware/stepUp');
 
 const router = express.Router();
 
@@ -14,5 +14,6 @@ router.use(authenticate);
 
 router.get('/', getSettings);
 router.patch('/', requireAdmin, updateSettings);
+router.post('/retention/purge', requireAdmin, requireStepUp, purgeRetentionData);
 
 module.exports = router;

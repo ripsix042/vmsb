@@ -114,6 +114,31 @@ async function sendWalkInRequestToHost(hostEmail, hostName, visitorName, visitor
   return sendMail({ to: hostEmail, subject, text, html });
 }
 
+async function sendInviteEmail(to, fullName, inviteUrl, expiresAt) {
+  const subject = 'You are invited to Kora Visitor Management';
+  const expiresLabel = expiresAt ? new Date(expiresAt).toISOString() : 'soon';
+  const text = [
+    `Hello ${fullName},`,
+    '',
+    'You have been invited to access Kora Visitor Management.',
+    `Redeem your invite here: ${inviteUrl}`,
+    `This invite is one-time and expires at ${expiresLabel}.`,
+    '',
+    'If you did not expect this invitation, ignore this email.',
+    '',
+    '— Kora VMS',
+  ].join('\n');
+  const html = [
+    `<p>Hello ${escapeHtml(fullName)},</p>`,
+    '<p>You have been invited to access Kora Visitor Management.</p>',
+    `<p><a href="${escapeHtml(inviteUrl)}">Redeem invitation</a></p>`,
+    `<p>This invite is <strong>one-time</strong> and expires at <strong>${escapeHtml(expiresLabel)}</strong>.</p>`,
+    '<p>If you did not expect this invitation, ignore this email.</p>',
+    '<p>— Kora VMS</p>',
+  ].join('\n');
+  return sendMail({ to, subject, text, html });
+}
+
 function escapeHtml(s) {
   if (typeof s !== 'string') return '';
   return s
@@ -129,5 +154,6 @@ module.exports = {
   sendWelcomeEmail,
   sendCheckInNotificationToHost,
   sendWalkInRequestToHost,
+  sendInviteEmail,
   isConfigured: () => isConfigured,
 };

@@ -1,5 +1,11 @@
 const Settings = require('../models/Settings');
 const IntegrationSettings = require('../models/IntegrationSettings');
+const Visit = require('../models/Visit');
+const Notification = require('../models/Notification');
+const AuditLog = require('../models/AuditLog');
+const { sanitizeForMongo } = require('../utils/sanitize');
+const { logAuditFromReq } = require('../services/auditLog');
+const { maskPiiDeep } = require('../utils/piiMask');
 
 const defaultSettings = {
   company_profile: {
@@ -51,7 +57,7 @@ async function getSettings(req, res, next) {
 
 async function updateSettings(req, res, next) {
   try {
-    const updates = req.body;
+    const updates = sanitizeForMongo(req.body);
     let doc = await Settings.findOne();
     if (!doc) {
       doc = await Settings.create(defaultSettings);
@@ -78,7 +84,7 @@ async function getIntegrationSettings(req, res, next) {
       doc = doc.toObject();
     }
     const { _id, __v, createdAt, updatedAt, ...rest } = doc;
-    res.json(rest);
+    res.json(maskPiiDeep(rest));
   } catch (err) {
     next(err);
   }
@@ -86,7 +92,7 @@ async function getIntegrationSettings(req, res, next) {
 
 async function updateIntegrationSettings(req, res, next) {
   try {
-    const updates = req.body;
+    const updates = sanitizeForMongo(req.body);
     let doc = await IntegrationSettings.findOne();
     if (!doc) {
       doc = await IntegrationSettings.create({});
@@ -99,7 +105,44 @@ async function updateIntegrationSettings(req, res, next) {
     await doc.save();
     const out = doc.toObject();
     const { _id, __v, createdAt, updatedAt, ...rest } = out;
-    res.json(rest);
+    res.json(maskPiiDeep(rest));
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function purgeRetentionData(req, res, next) {
+  try {
+    const retentionDays = Math.max(
+      1,
+      Number(req.body?.retention_days) || Number(process.env.RETENTION_DAYS_DEFAULT || 365)
+    );
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+    const [visits, notifications, auditLogs] = await Promise.all([
+      Visit.deleteMany({ createdAt: { $lt: cutoff }, status: { $in: ['checked_out', 'expired', 'declined'] } }),
+      Notification.deleteMany({ createdAt: { $lt: cutoff } }),
+      AuditLog.deleteMany({ createdAt: { $lt: cutoff } }),
+    ]);
+    logAuditFromReq(req, {
+      action: 'retention_purge',
+      resourceType: 'Settings',
+      metadata: {
+        retention_days: retentionDays,
+        deleted_visits: visits.deletedCount || 0,
+        deleted_notifications: notifications.deletedCount || 0,
+        deleted_audit_logs: auditLogs.deletedCount || 0,
+        summary: `Retention purge executed for ${retentionDays} days`,
+      },
+    }).catch(() => {});
+    res.json({
+      retention_days: retentionDays,
+      cutoff: cutoff.toISOString(),
+      deleted: {
+        visits: visits.deletedCount || 0,
+        notifications: notifications.deletedCount || 0,
+        audit_logs: auditLogs.deletedCount || 0,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -110,4 +153,5 @@ module.exports = {
   updateSettings,
   getIntegrationSettings,
   updateIntegrationSettings,
+  purgeRetentionData,
 };

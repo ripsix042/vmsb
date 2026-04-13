@@ -1,0 +1,29 @@
+name: Backend Security Checks
+
+on:
+  push:
+    branches: [main, staging, ebuka, ebu]
+  pull_request:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit (high and critical)
+        run: npm run security:audit

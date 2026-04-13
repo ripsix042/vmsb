@@ -29,6 +29,8 @@ const visitSchema = new mongoose.Schema(
     qr_used_at: { type: Date, default: null },
     visit_id: { type: String, required: true, unique: true },
     qr_token: { type: String, sparse: true, unique: true, default: null },
+    qr_jti: { type: String, sparse: true, unique: true, default: null },
+    qr_expires_at: { type: Date, default: null },
   },
   { timestamps: true }
 );

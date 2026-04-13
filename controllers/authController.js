@@ -1,8 +1,10 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const RefreshToken = require('../models/RefreshToken');
+const { InviteToken, INVITE_STATUS } = require('../models/InviteToken');
 const { unauthorized, conflict, badRequest } = require('../utils/errors');
 const { toFrontendRole } = require('../utils/roleMap');
 const { ROLES, USER_STATUS } = require('../config/constants');
@@ -11,7 +13,9 @@ const {
   USE_HTTPONLY_COOKIE,
   COOKIE_NAME_REFRESH,
   COOKIE_OPTIONS,
+  LOGIN_LOCKOUT,
   PASSWORD,
+  INVITES,
 } = require('../config/security');
 const {
   logLoginSuccess,
@@ -21,6 +25,7 @@ const {
 } = require('../services/securityLogger');
 const { logAudit } = require('../services/auditLog');
 const { generateSecret, verifyCode, buildOtpAuthUrl } = require('../services/totp');
+const { sendInviteEmail } = require('../services/emailService');
 const {
   randomPKCECodeVerifier,
   calculatePKCECodeChallenge,
@@ -48,6 +53,35 @@ const {
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function buildInviteToken() {
+  return `inv-${crypto.randomBytes(32).toString('hex')}`;
+}
+
+function isAllowedInviteRedirect(urlString) {
+  if (!urlString) return false;
+  try {
+    const candidate = new URL(urlString);
+    return INVITES.redirectAllowlist.some((base) => {
+      try {
+        const allowed = new URL(base);
+        return candidate.origin === allowed.origin;
+      } catch (e) {
+        return false;
+      }
+    });
+  } catch (e) {
+    return false;
+  }
+}
+
+function buildInviteRedeemUrl(rawRedirect, token) {
+  const fallback = process.env.FRONTEND_URL || 'http://localhost:8080';
+  const base = rawRedirect && isAllowedInviteRedirect(rawRedirect) ? rawRedirect : fallback;
+  const url = new URL(base);
+  url.searchParams.set('invite_token', token);
+  return url.toString();
 }
 
 function departmentFieldsForUser(user) {
@@ -87,6 +121,43 @@ function createAccessPayload(user) {
     },
     role: toFrontendRole(user.role),
   };
+}
+
+function isMfaEligibleRole(role) {
+  return role === ROLES.ADMIN || role === ROLES.EMPLOYEE;
+}
+
+function isAccountLocked(user) {
+  return !!(user?.lockUntil && user.lockUntil.getTime() > Date.now());
+}
+
+function lockoutRemainingMs(user) {
+  if (!isAccountLocked(user)) return 0;
+  return Math.max(0, user.lockUntil.getTime() - Date.now());
+}
+
+async function resetFailedLogins(userId) {
+  await User.updateOne(
+    { _id: userId },
+    { $set: { failedLoginAttempts: 0, lockUntil: null, lastFailedLoginAt: null } }
+  );
+}
+
+async function registerFailedLogin(user, req, identifier, reason) {
+  const nextAttempts = (Number(user.failedLoginAttempts || 0) || 0) + 1;
+  const shouldLock = nextAttempts >= LOGIN_LOCKOUT.maxFailedAttempts;
+  const lockUntil = shouldLock ? new Date(Date.now() + LOGIN_LOCKOUT.lockMs) : null;
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        failedLoginAttempts: nextAttempts,
+        lastFailedLoginAt: new Date(),
+        lockUntil,
+      },
+    }
+  );
+  logLoginFailure(req, reason, identifier);
 }
 
 async function attachRefreshToPayload(payload, user, req, res) {
@@ -286,6 +357,7 @@ const oktaCallback = async (req, res, next) => {
     if (user.status !== 'Active') {
       throw unauthorized('Account is inactive');
     }
+    await resetFailedLogins(user._id);
 
     if (isDualOktaMode() && !OKTA_SYNC_ROLE_FROM_INTENT) {
       if (oktaIntent === 'admin' && user.role !== ROLES.ADMIN) {
@@ -340,14 +412,33 @@ const login = async (req, res, next) => {
       logLoginFailure(req, 'user_not_found', identifier);
       throw unauthorized('Invalid email or password');
     }
+    if (isAccountLocked(user)) {
+      logLoginFailure(req, 'account_locked', identifier);
+      throw unauthorized(`Account is locked. Try again in ${Math.ceil(lockoutRemainingMs(user) / 60000)} minute(s)`);
+    }
     const valid = await user.comparePassword(password);
     if (!valid) {
-      logLoginFailure(req, 'invalid_password', identifier);
+      await registerFailedLogin(user, req, identifier, 'invalid_password');
       throw unauthorized('Invalid email or password');
     }
     if (user.status !== 'Active') {
       logLoginFailure(req, 'account_inactive', identifier);
       throw unauthorized('Account is inactive');
+    }
+    await resetFailedLogins(user._id);
+
+    if (isMfaEligibleRole(user.role) && user.twoFactorEnabled && user.twoFactorSecret) {
+      const tempToken = setTempSession(user._id.toString());
+      logAudit({
+        userId: user._id,
+        action: 'login_challenge',
+        resourceType: 'User',
+        resourceId: user._id.toString(),
+        metadata: { summary: 'Login awaiting 2FA', role: toFrontendRole(user.role) },
+        ipAddress: req.ip || req.connection?.remoteAddress,
+        userAgent: req.get('user-agent'),
+      }).catch(() => {});
+      return res.json({ requires2FA: true, tempToken });
     }
 
     const accessToken = jwt.sign(
@@ -418,6 +509,107 @@ const me = async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+};
+
+/**
+ * POST /auth/2fa/setup
+ * Requires auth. Admin/Employee only.
+ */
+const twoFactorSetup = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (!isMfaEligibleRole(user.role)) {
+      throw unauthorized('2FA setup is available only for admin and employee accounts');
+    }
+    const secret = generateSecret();
+    const setupToken = setSetupSession(user._id.toString(), secret);
+    const qrCodeUrl = buildOtpAuthUrl({
+      secret,
+      accountName: user.email || user.fullName || 'Kora user',
+      issuer: 'Kora VMS',
+    });
+    logAudit({
+      userId: user._id,
+      action: '2fa_setup_started',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: '2FA setup started' },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+    return res.json({ setupToken, secret, qrCodeUrl });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * POST /auth/2fa/enable
+ * Requires auth. Body: { setupToken, code }
+ */
+const twoFactorEnable = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (!isMfaEligibleRole(user.role)) {
+      throw unauthorized('2FA is available only for admin and employee accounts');
+    }
+    const { setupToken, code } = req.body;
+    const setup = getSetupSession(setupToken);
+    if (!setup || setup.userId !== user._id.toString()) {
+      throw unauthorized('Setup token is invalid or expired');
+    }
+    if (!verifyCode(setup.secret, code)) throw badRequest('Invalid 2FA code');
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { twoFactorSecret: setup.secret, twoFactorEnabled: true } }
+    );
+    clearSetupSession(setupToken);
+    logAudit({
+      userId: user._id,
+      action: '2fa_enabled',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: '2FA enabled' },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+    return res.json({ success: true, enabled: true });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * POST /auth/2fa/disable
+ * Requires auth. Body: { password }.
+ */
+const twoFactorDisable = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select('+passwordHash');
+    if (!user) throw unauthorized('User not found');
+    if (!isMfaEligibleRole(user.role)) {
+      throw unauthorized('2FA is available only for admin and employee accounts');
+    }
+    const { password } = req.body;
+    const valid = await user.comparePassword(password);
+    if (!valid) throw unauthorized('Invalid password');
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { twoFactorEnabled: false, twoFactorSecret: null } }
+    );
+    logAudit({
+      userId: user._id,
+      action: '2fa_disabled',
+      resourceType: 'User',
+      resourceId: user._id.toString(),
+      metadata: { summary: '2FA disabled' },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+    return res.json({ success: true, enabled: false });
+  } catch (err) {
+    return next(err);
   }
 };
 
@@ -501,6 +693,159 @@ const kioskRegister = async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+};
+
+const createInvite = async (req, res, next) => {
+  try {
+    const { email, fullName, role, redirect_url: redirectUrl } = req.body;
+    if (redirectUrl && !isAllowedInviteRedirect(redirectUrl)) {
+      throw badRequest('redirect_url is not allowlisted');
+    }
+    const existingUser = await User.findOne({ email }).select('_id');
+    if (existingUser) {
+      throw conflict('A user with this email already exists');
+    }
+
+    const now = new Date();
+    await InviteToken.updateMany(
+      {
+        email,
+        status: INVITE_STATUS.PENDING,
+        expiresAt: { $gt: now },
+      },
+      {
+        $set: {
+          status: INVITE_STATUS.REVOKED,
+          revokedAt: now,
+        },
+      }
+    );
+
+    const plainToken = buildInviteToken();
+    const tokenHash = hashToken(plainToken);
+    const expiresAt = new Date(Date.now() + INVITES.ttlMinutes * 60 * 1000);
+    const invite = await InviteToken.create({
+      email,
+      fullName,
+      role,
+      tokenHash,
+      invitedByUserId: req.user._id,
+      expiresAt,
+    });
+
+    const inviteUrl = buildInviteRedeemUrl(redirectUrl, plainToken);
+    const mailResult = await sendInviteEmail(email, fullName, inviteUrl, expiresAt);
+    logAudit({
+      userId: req.user._id,
+      action: 'invite_created',
+      resourceType: 'InviteToken',
+      resourceId: invite._id.toString(),
+      metadata: {
+        email,
+        role,
+        expires_at: expiresAt.toISOString(),
+        delivery_sent: !!mailResult?.sent,
+        summary: `Invite created for ${email}`,
+      },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+
+    return res.status(201).json({
+      invite_id: invite._id.toString(),
+      email,
+      role,
+      status: invite.status,
+      expires_at: expiresAt.toISOString(),
+      delivery_sent: !!mailResult?.sent,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const redeemInvite = async (req, res, next) => {
+  try {
+    const { token, password, phone } = req.body;
+    const tokenHash = hashToken(token);
+    const invite = await InviteToken.findOne({ tokenHash });
+    if (!invite) throw unauthorized('Invite token is invalid or expired');
+    if (invite.status !== INVITE_STATUS.PENDING) throw unauthorized('Invite token is invalid or expired');
+    if (invite.expiresAt.getTime() <= Date.now()) {
+      invite.status = INVITE_STATUS.EXPIRED;
+      await invite.save();
+      throw unauthorized('Invite token is invalid or expired');
+    }
+
+    const existing = await User.findOne({ email: invite.email }).select('_id');
+    if (existing) throw conflict('A user with this email already exists');
+
+    const passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+    const user = await User.create({
+      fullName: invite.fullName,
+      email: invite.email,
+      passwordHash,
+      phone: phone || null,
+      role: invite.role,
+      status: USER_STATUS.ACTIVE,
+    });
+
+    invite.status = INVITE_STATUS.REDEEMED;
+    invite.redeemedAt = new Date();
+    invite.redeemedByUserId = user._id;
+    await invite.save();
+
+    logAudit({
+      userId: user._id,
+      action: 'invite_redeemed',
+      resourceType: 'InviteToken',
+      resourceId: invite._id.toString(),
+      metadata: {
+        invited_email: invite.email,
+        invited_role: invite.role,
+        summary: `${invite.email} redeemed invite`,
+      },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+
+    let payload = createAccessPayload(user);
+    payload = await attachRefreshToPayload(payload, user, req, res);
+    return res.status(201).json(payload);
+  } catch (err) {
+    return next(err);
+  }
+};
+
+const revokeInvite = async (req, res, next) => {
+  try {
+    const { inviteId } = req.params;
+    if (!mongoose.isValidObjectId(inviteId)) throw badRequest('Invalid inviteId');
+    const invite = await InviteToken.findById(inviteId);
+    if (!invite) throw unauthorized('Invite not found');
+    if (invite.status !== INVITE_STATUS.PENDING) {
+      throw conflict('Only pending invites can be revoked');
+    }
+    invite.status = INVITE_STATUS.REVOKED;
+    invite.revokedAt = new Date();
+    await invite.save();
+    logAudit({
+      userId: req.user._id,
+      action: 'invite_revoked',
+      resourceType: 'InviteToken',
+      resourceId: invite._id.toString(),
+      metadata: {
+        email: invite.email,
+        reason: req.body?.reason || null,
+        summary: `Invite revoked for ${invite.email}`,
+      },
+      ipAddress: req.ip || req.connection?.remoteAddress,
+      userAgent: req.get('user-agent'),
+    }).catch(() => {});
+    return res.json({ invite_id: invite._id.toString(), status: invite.status });
+  } catch (err) {
+    return next(err);
   }
 };
 
@@ -611,9 +956,16 @@ const kioskLogin = async (req, res, next) => {
       role: ROLES.KIOSK_OPERATOR,
     }).select('+passwordHash +twoFactorSecret');
     if (!user) throw unauthorized('Invalid operator or password');
+    if (isAccountLocked(user)) {
+      throw unauthorized(`Account is locked. Try again in ${Math.ceil(lockoutRemainingMs(user) / 60000)} minute(s)`);
+    }
     if (user.status !== USER_STATUS.ACTIVE) throw unauthorized('Account is inactive');
     const valid = await user.comparePassword(password);
-    if (!valid) throw unauthorized('Invalid operator or password');
+    if (!valid) {
+      await registerFailedLogin(user, req, String(operatorId), 'invalid_password');
+      throw unauthorized('Invalid operator or password');
+    }
+    await resetFailedLogins(user._id);
 
     if (user.twoFactorEnabled && user.twoFactorSecret) {
       const tempToken = setTempSession(user._id.toString());
@@ -820,6 +1172,9 @@ module.exports = {
   refresh,
   logout,
   me,
+  twoFactorSetup,
+  twoFactorEnable,
+  twoFactorDisable,
   register,
   kioskRegister,
   otpSend,
@@ -829,4 +1184,7 @@ module.exports = {
   kioskEnroll2FA,
   kioskLogin,
   verify2FA,
+  createInvite,
+  redeemInvite,
+  revokeInvite,
 };
