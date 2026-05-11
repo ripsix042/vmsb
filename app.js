@@ -33,19 +33,34 @@ if (trustProxyEnv === 'true') {
 app.use(cookieParser());
 
 const corsOrigin = getCorsOrigin();
-if (corsOrigin.length === 0 && isProduction) {
+if (corsOrigin.length === 0 && isProduction || corsOrigin.length === 0 && corsOrigin.includes('localhost:8080')) {
   throw new Error('CORS_ORIGIN must be set in production (e.g. https://your-frontend.com)');
 }
 app.use(cors({ origin: corsOrigin.length ? corsOrigin : '*', credentials: true }));
 
 app.use(helmet({
-  contentSecurityPolicy: isProduction,
+  contentSecurityPolicy: isProduction
+    ? {
+        useDefaults: true,
+        directives: {
+          frameAncestors: ["'none'"],
+        },
+      }
+    : false,
   crossOriginEmbedderPolicy: isProduction,
   hsts: isProduction ? { maxAge: 31536000, includeSubDomains: true } : false,
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   xContentTypeOptions: true,
   xFrameOptions: { action: 'deny' },
 }));
+
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'DENY');
+  if (!isProduction) {
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  }
+  next();
+});
 
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));

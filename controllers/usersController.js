@@ -130,15 +130,30 @@ async function listHosts(req, res, next) {
     })
       .select('fullName email phone departmentId departmentName')
       .lean();
-    const hosts = users.map((u) => ({
-      id: u._id.toString(),
-      name: u.fullName,
-      email: u.email,
-      department: u.departmentName || null,
-      department_id: departmentIdToString(u.departmentId),
-      department_name: u.departmentName || null,
-      phone: u.phone || undefined,
-    }));
+
+    const isAdmin = req.user.role === ROLES.ADMIN;
+
+    const hosts = users.map((u) => {
+      const id = u._id.toString();
+      const name = u.fullName;
+      const department = u.departmentName || null;
+      if (isAdmin) {
+        return {
+          id,
+          name,
+          email: u.email,
+          department,
+          department_id: departmentIdToString(u.departmentId),
+          department_name: u.departmentName || null,
+          phone: u.phone || undefined,
+        };
+      }
+      return {
+        id,
+        name,
+        department,
+      };
+    });
     res.json({ hosts });
   } catch (err) {
     next(err);
