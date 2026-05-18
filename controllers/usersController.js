@@ -124,14 +124,33 @@ async function getProfileById(req, res, next) {
 
 async function listHosts(req, res, next) {
   try {
+    const isAdmin = req.user.role === ROLES.ADMIN;
+
+    // Employees only need themselves (host portal); no staff directory enumeration.
+    if (req.user.role === ROLES.EMPLOYEE) {
+      const self = await User.findById(req.user._id)
+        .select('fullName departmentName status')
+        .lean();
+      if (!self || self.status !== USER_STATUS.ACTIVE) {
+        return res.json({ hosts: [] });
+      }
+      return res.json({
+        hosts: [
+          {
+            id: req.user._id.toString(),
+            name: self.fullName,
+            department: self.departmentName || null,
+          },
+        ],
+      });
+    }
+
     const users = await User.find({
       role: { $in: [ROLES.ADMIN, ROLES.EMPLOYEE] },
       status: USER_STATUS.ACTIVE,
     })
       .select('fullName email phone departmentId departmentName')
       .lean();
-
-    const isAdmin = req.user.role === ROLES.ADMIN;
 
     const hosts = users.map((u) => {
       const id = u._id.toString();
