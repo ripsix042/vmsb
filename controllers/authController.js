@@ -25,7 +25,10 @@ const {
 } = require('../services/securityLogger');
 const { logAudit } = require('../services/auditLog');
 const { generateSecret, verifyCode, buildOtpAuthUrl } = require('../services/totp');
-const { sendInviteEmail } = require('../services/emailService');
+const { sendInviteEmail, sendAccountLockoutEmail, sendAccountLockoutAdminAlert } = require('../services/emailService');
+const { applyPasswordChange, prepareNewUserPassword } = require('../services/passwordService');
+const { signAccessToken } = require('../utils/sessionToken');
+const { createExchangeCode, consumeExchangeCode } = require('../services/ssoExchangeStore');
 const {
   randomPKCECodeVerifier,
   calculatePKCECodeChallenge,
@@ -101,15 +104,16 @@ function setRefreshCookie(res, token) {
 }
 
 function clearRefreshCookie(res) {
-  res.clearCookie(COOKIE_NAME_REFRESH, { path: COOKIE_OPTIONS.path });
+  res.clearCookie(COOKIE_NAME_REFRESH, {
+    path: COOKIE_OPTIONS.path,
+    httpOnly: COOKIE_OPTIONS.httpOnly,
+    secure: COOKIE_OPTIONS.secure,
+    sameSite: COOKIE_OPTIONS.sameSite,
+  });
 }
 
 function createAccessPayload(user) {
-  const accessToken = jwt.sign(
-    { userId: user._id },
-    process.env.JWT_SECRET,
-    { expiresIn: JWT_ACCESS_EXPIRES_IN }
-  );
+  const accessToken = signAccessToken(user);
   return {
     token: accessToken,
     user: {
@@ -124,7 +128,7 @@ function createAccessPayload(user) {
 }
 
 function isMfaEligibleRole(role) {
-  return role === ROLES.ADMIN || role === ROLES.EMPLOYEE;
+  return role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN || role === ROLES.EMPLOYEE;
 }
 
 function isAccountLocked(user) {
@@ -143,6 +147,68 @@ async function resetFailedLogins(userId) {
   );
 }
 
+function isValidEmailAddress(value) {
+  return typeof value === 'string' && value.includes('@') && value.includes('.');
+}
+
+function maskIp(ip) {
+  if (!ip || typeof ip !== 'string') return 'unknown';
+  if (ip.includes('.')) {
+    const parts = ip.split('.');
+    if (parts.length === 4) return `${parts[0]}.${parts[1]}.${parts[2]}.xxx`;
+  }
+  return ip.length > 8 ? `${ip.slice(0, 6)}…` : ip;
+}
+
+async function notifyAccountLockout(user, req, lockUntil) {
+  const ip = maskIp(req.ip || req.connection?.remoteAddress);
+  const lockMinutes = Math.ceil(LOGIN_LOCKOUT.lockMs / 60000);
+  const lockedAt = new Date().toISOString();
+
+  if (isValidEmailAddress(user.email)) {
+    sendAccountLockoutEmail(user.email, {
+      name: user.fullName,
+      lockMinutes,
+      lockedAt,
+      ip,
+    }).catch(() => {});
+  }
+
+  const admins = await User.find({
+    role: ROLES.ADMIN,
+    status: USER_STATUS.ACTIVE,
+  })
+    .select('email fullName')
+    .lean();
+
+  for (const admin of admins) {
+    if (!isValidEmailAddress(admin.email)) continue;
+    sendAccountLockoutAdminAlert(admin.email, {
+      adminName: admin.fullName,
+      lockedAccountName: user.fullName,
+      lockedAccountRole: user.role,
+      lockedAccountIdentifier: user.email,
+      lockMinutes,
+      lockedAt,
+      ip,
+    }).catch(() => {});
+  }
+
+  logAudit({
+    userId: user._id,
+    action: 'account_locked',
+    resourceType: 'User',
+    resourceId: user._id.toString(),
+    metadata: {
+      summary: `Account locked after ${LOGIN_LOCKOUT.maxFailedAttempts} failed login attempts`,
+      lockUntil: lockUntil.toISOString(),
+      ip,
+    },
+    ipAddress: req.ip || req.connection?.remoteAddress,
+    userAgent: req.get('user-agent'),
+  }).catch(() => {});
+}
+
 async function registerFailedLogin(user, req, identifier, reason) {
   const nextAttempts = (Number(user.failedLoginAttempts || 0) || 0) + 1;
   const shouldLock = nextAttempts >= LOGIN_LOCKOUT.maxFailedAttempts;
@@ -158,6 +224,9 @@ async function registerFailedLogin(user, req, identifier, reason) {
     }
   );
   logLoginFailure(req, reason, identifier);
+  if (shouldLock && lockUntil) {
+    await notifyAccountLockout(user, req, lockUntil);
+  }
 }
 
 async function attachRefreshToPayload(payload, user, req, res) {
@@ -360,7 +429,7 @@ const oktaCallback = async (req, res, next) => {
     await resetFailedLogins(user._id);
 
     if (isDualOktaMode() && !OKTA_SYNC_ROLE_FROM_INTENT) {
-      if (oktaIntent === 'admin' && user.role !== ROLES.ADMIN) {
+      if (oktaIntent === 'admin' && user.role !== ROLES.ADMIN && user.role !== ROLES.SUPER_ADMIN) {
         throw unauthorized('This account is not an administrator. Use the host sign-in with Okta.');
       }
       if (oktaIntent === 'host' && user.role !== ROLES.EMPLOYEE) {
@@ -386,8 +455,13 @@ const oktaCallback = async (req, res, next) => {
     }
 
     const redirectUrl = new URL(OKTA_POST_LOGIN_REDIRECT);
-    redirectUrl.searchParams.set('token', payload.token);
-    if (payload.refreshToken) redirectUrl.searchParams.set('refreshToken', payload.refreshToken);
+    const exchangeCode = createExchangeCode({
+      token: payload.token,
+      role: payload.role,
+      user: payload.user,
+      refreshToken: USE_HTTPONLY_COOKIE ? undefined : payload.refreshToken,
+    });
+    redirectUrl.searchParams.set('sso_code', exchangeCode);
     redirectUrl.searchParams.set('role', payload.role);
     res.redirect(redirectUrl.toString());
   } catch (err) {
@@ -441,11 +515,7 @@ const login = async (req, res, next) => {
       return res.json({ requires2FA: true, tempToken });
     }
 
-    const accessToken = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: JWT_ACCESS_EXPIRES_IN }
-    );
+    const accessToken = signAccessToken(user);
     const refreshToken = generateRefreshToken();
     const refreshExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await RefreshToken.create({
@@ -624,7 +694,7 @@ const register = async (req, res, next) => {
     if (existing) {
       throw conflict('An account with this email already exists');
     }
-    const passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+    const passwordHash = await prepareNewUserPassword(password, { username: email });
     const user = await User.create({
       fullName,
       email,
@@ -632,11 +702,7 @@ const register = async (req, res, next) => {
       role: ROLES.EMPLOYEE,
       status: USER_STATUS.ACTIVE,
     });
-    const accessToken = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: JWT_ACCESS_EXPIRES_IN }
-    );
+    const accessToken = signAccessToken(user);
     res.status(201).json({
       user: {
         id: user._id,
@@ -667,7 +733,7 @@ const kioskRegister = async (req, res, next) => {
     if (existing) {
       throw conflict('A kiosk operator with this phone or identifier already exists');
     }
-    const passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+    const passwordHash = await prepareNewUserPassword(password, { username: identifier });
     const user = await User.create({
       fullName,
       email: identifier,
@@ -675,11 +741,7 @@ const kioskRegister = async (req, res, next) => {
       role: ROLES.KIOSK_OPERATOR,
       status: USER_STATUS.ACTIVE,
     });
-    const accessToken = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: JWT_ACCESS_EXPIRES_IN }
-    );
+    const accessToken = signAccessToken(user);
     res.status(201).json({
       user: {
         id: user._id,
@@ -699,6 +761,9 @@ const kioskRegister = async (req, res, next) => {
 const createInvite = async (req, res, next) => {
   try {
     const { email, fullName, role, redirect_url: redirectUrl } = req.body;
+    if (role === ROLES.SUPER_ADMIN && req.user.role !== ROLES.SUPER_ADMIN) {
+      throw forbidden('Only super-admins can invite SuperAdmin users');
+    }
     if (redirectUrl && !isAllowedInviteRedirect(redirectUrl)) {
       throw badRequest('redirect_url is not allowlisted');
     }
@@ -781,7 +846,7 @@ const redeemInvite = async (req, res, next) => {
     const existing = await User.findOne({ email: invite.email }).select('_id');
     if (existing) throw conflict('A user with this email already exists');
 
-    const passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+    const passwordHash = await prepareNewUserPassword(password, { username: invite.email });
     const user = await User.create({
       fullName: invite.fullName,
       email: invite.email,
@@ -887,9 +952,9 @@ const kioskSetup = async (req, res, next) => {
     const user = await User.findOne({
       _id: operatorId,
       role: ROLES.KIOSK_OPERATOR,
-    }).select('+passwordHash');
+    }).select('+passwordHash +passwordHistory');
     if (!user) throw unauthorized('Kiosk operator not found');
-    user.passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+    await applyPasswordChange(user, password, { username: user.fullName });
     await user.save();
 
     const secret = generateSecret();
@@ -1064,11 +1129,7 @@ const refresh = async (req, res, next) => {
 
     logRefreshTokenUsed(req, user._id);
 
-    const accessToken = jwt.sign(
-      { userId: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: JWT_ACCESS_EXPIRES_IN }
-    );
+    const accessToken = signAccessToken(user);
     const newRefresh = generateRefreshToken();
     const refreshExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await RefreshToken.updateOne(
@@ -1096,30 +1157,44 @@ const refresh = async (req, res, next) => {
 
 /**
  * POST /auth/logout
- * Body: { refreshToken } or cookie. Revokes the refresh token.
+ * Revokes all refresh tokens and invalidates access JWTs via sessionVersion bump.
  */
 const logout = async (req, res, next) => {
   try {
-    const token =
-      req.cookies?.[COOKIE_NAME_REFRESH] ||
-      req.body?.refreshToken ||
-      req.body?.refresh_token;
-    if (token) {
-      const hash = hashToken(token);
-      const doc = await RefreshToken.findOne({ tokenHash: hash, revokedAt: null });
-      if (doc) {
-        await RefreshToken.updateOne({ _id: doc._id }, { revokedAt: new Date() });
-        logLogout(req, doc.userId);
-      }
-    } else if (req.user?._id) {
-      await RefreshToken.updateMany(
-        { userId: req.user._id, revokedAt: null },
-        { revokedAt: new Date() }
-      );
-      logLogout(req, req.user._id);
-    }
+    const userId = req.user._id;
+    await RefreshToken.updateMany(
+      { userId, revokedAt: null },
+      { revokedAt: new Date() }
+    );
+    await User.updateOne({ _id: userId }, { $inc: { sessionVersion: 1 } });
+    logLogout(req, userId);
     if (USE_HTTPONLY_COOKIE) clearRefreshCookie(res);
     res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /auth/okta/exchange
+ * Body: { code }. One-time exchange for SSO redirect (no JWT in URL).
+ */
+const oktaExchange = async (req, res, next) => {
+  try {
+    const { code } = req.body;
+    const data = consumeExchangeCode(code);
+    if (!data) {
+      throw unauthorized('SSO exchange code is invalid or expired');
+    }
+    const payload = {
+      token: data.token,
+      user: data.user,
+      role: data.role,
+    };
+    if (data.refreshToken) {
+      payload.refreshToken = data.refreshToken;
+    }
+    res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -1169,6 +1244,7 @@ module.exports = {
   login,
   oktaLogin,
   oktaCallback,
+  oktaExchange,
   refresh,
   logout,
   me,

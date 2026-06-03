@@ -65,6 +65,15 @@ if (process.env.NODE_ENV === 'production' && isWeakJwtSecret(jwtSecret)) {
   console.error('JWT_SECRET is too weak or default. Use a long random string (e.g. 32+ chars) in production.');
   process.exit(1);
 }
+const qrSigningSecret = process.env.QR_SIGNING_SECRET;
+if (!qrSigningSecret || !qrSigningSecret.trim()) {
+  console.error('QR_SIGNING_SECRET is not set. Set it in .env (local) or in your host secrets manager (production).');
+  process.exit(1);
+}
+if (process.env.NODE_ENV === 'production' && isWeakJwtSecret(qrSigningSecret)) {
+  console.error('QR_SIGNING_SECRET is too weak or default. Use a long random string (e.g. 32+ chars) in production.');
+  process.exit(1);
+}
 if (process.env.NODE_ENV === 'production') {
   const smtpHost = (process.env.SMTP_HOST || '').trim().toLowerCase();
   const smtpUser = (process.env.SMTP_USER || '').trim();
@@ -96,6 +105,23 @@ connectDB(uri)
     app.set('httpServer', server);
     const { attachSocket } = require('./services/socket');
     attachSocket(server);
+
+    if (process.env.AUDIT_RETENTION_CRON_ENABLED === 'true') {
+      const cron = require('node-cron');
+      const { runScheduledAuditRetention } = require('./services/auditRetention');
+      const schedule = process.env.AUDIT_RETENTION_CRON_SCHEDULE || '0 2 * * *';
+      cron.schedule(schedule, () => {
+        runScheduledAuditRetention().catch((err) => {
+          console.error('[audit-retention] scheduled purge failed:', err);
+        });
+      });
+      console.log(`[audit-retention] scheduled purge enabled (${schedule})`);
+      if (process.env.AUDIT_RETENTION_RUN_ON_STARTUP === 'true') {
+        runScheduledAuditRetention().catch((err) => {
+          console.error('[audit-retention] startup purge failed:', err);
+        });
+      }
+    }
   })
   .catch((err) => {
     console.error('Failed to start server:', err);

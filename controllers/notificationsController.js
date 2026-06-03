@@ -1,6 +1,6 @@
 const Notification = require('../models/Notification');
 const { notFound, forbidden, badRequest } = require('../utils/errors');
-const { ROLES } = require('../config/constants');
+const { ROLES, isAdminRole } = require('../config/constants');
 const mongoose = require('mongoose');
 
 function notificationToApi(n) {
@@ -22,7 +22,7 @@ function notificationToApi(n) {
 async function listNotifications(req, res, next) {
   try {
     const { hostId } = req.query;
-    const isAdmin = req.user.role === ROLES.ADMIN;
+    const isAdmin = isAdminRole(req.user.role);
     let userId = req.user._id.toString();
     if (hostId) {
       if (!isAdmin) throw forbidden('Only admins can query notifications by hostId');
@@ -42,7 +42,7 @@ async function listNotifications(req, res, next) {
 async function createNotification(req, res, next) {
   try {
     const { type, message, title, body, visitor_id, host_id, read } = req.body;
-    const isAdmin = req.user.role === ROLES.ADMIN;
+    const isAdmin = isAdminRole(req.user.role);
     const requesterId = req.user._id.toString();
     const targetUserId = host_id || requesterId;
     if (!isAdmin && targetUserId !== requesterId) {

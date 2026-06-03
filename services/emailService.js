@@ -139,6 +139,66 @@ async function sendInviteEmail(to, fullName, inviteUrl, expiresAt) {
   return sendMail({ to, subject, text, html });
 }
 
+async function sendAccountLockoutEmail(to, { name, lockMinutes, lockedAt, ip }) {
+  const subject = 'Your Kora VMS account has been locked';
+  const text = [
+    `Hello ${name},`,
+    '',
+    `Your account was temporarily locked after multiple failed sign-in attempts.`,
+    `Lock duration: ${lockMinutes} minutes.`,
+    `Locked at: ${lockedAt}`,
+    `Source IP: ${ip}`,
+    '',
+    'If this was not you, contact your administrator immediately.',
+    '',
+    '— Kora VMS',
+  ].join('\n');
+  const html = [
+    `<p>Hello ${escapeHtml(name)},</p>`,
+    '<p>Your account was temporarily locked after multiple failed sign-in attempts.</p>',
+    `<p><strong>Lock duration:</strong> ${lockMinutes} minutes<br/>`,
+    `<strong>Locked at:</strong> ${escapeHtml(lockedAt)}<br/>`,
+    `<strong>Source IP:</strong> ${escapeHtml(ip)}</p>`,
+    '<p>If this was not you, contact your administrator immediately.</p>',
+    '<p>— Kora VMS</p>',
+  ].join('\n');
+  return sendMail({ to, subject, text, html });
+}
+
+async function sendAccountLockoutAdminAlert(
+  to,
+  { adminName, lockedAccountName, lockedAccountRole, lockedAccountIdentifier, lockMinutes, lockedAt, ip }
+) {
+  const subject = 'Kora VMS account lockout alert';
+  const text = [
+    `Hello ${adminName},`,
+    '',
+    'An account was locked after repeated failed sign-in attempts:',
+    `Account: ${lockedAccountName}`,
+    `Role: ${lockedAccountRole}`,
+    `Identifier: ${lockedAccountIdentifier}`,
+    `Lock duration: ${lockMinutes} minutes`,
+    `Locked at: ${lockedAt}`,
+    `Source IP: ${ip}`,
+    '',
+    '— Kora VMS',
+  ].join('\n');
+  const html = [
+    `<p>Hello ${escapeHtml(adminName)},</p>`,
+    '<p>An account was locked after repeated failed sign-in attempts:</p>',
+    '<ul>',
+    `<li><strong>Account:</strong> ${escapeHtml(lockedAccountName)}</li>`,
+    `<li><strong>Role:</strong> ${escapeHtml(lockedAccountRole)}</li>`,
+    `<li><strong>Identifier:</strong> ${escapeHtml(lockedAccountIdentifier)}</li>`,
+    `<li><strong>Lock duration:</strong> ${lockMinutes} minutes</li>`,
+    `<li><strong>Locked at:</strong> ${escapeHtml(lockedAt)}</li>`,
+    `<li><strong>Source IP:</strong> ${escapeHtml(ip)}</li>`,
+    '</ul>',
+    '<p>— Kora VMS</p>',
+  ].join('\n');
+  return sendMail({ to, subject, text, html });
+}
+
 function escapeHtml(s) {
   if (typeof s !== 'string') return '';
   return s
@@ -155,5 +215,7 @@ module.exports = {
   sendCheckInNotificationToHost,
   sendWalkInRequestToHost,
   sendInviteEmail,
+  sendAccountLockoutEmail,
+  sendAccountLockoutAdminAlert,
   isConfigured: () => isConfigured,
 };

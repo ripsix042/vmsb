@@ -1,9 +1,9 @@
 const AuditLog = require('../models/AuditLog');
-const Settings = require('../models/Settings');
 const { badRequest } = require('../utils/errors');
 const { escapeRegex } = require('../utils/sanitize');
+const { csvSafe } = require('../utils/csvSafe');
 const {
-  logAuditFromReq,
+  recordAudit,
   verifyAuditChainIntegrity,
   buildInsiderRiskReport,
 } = require('../services/auditLog');
@@ -37,13 +37,6 @@ function buildFilters(query = {}) {
     if (to) filters.createdAt.$lte = to;
   }
   return filters;
-}
-
-function csvSafe(value) {
-  if (value == null) return '';
-  let s = typeof value === 'string' ? value : JSON.stringify(value);
-  if (/^[=\-+@]/.test(s)) s = `'${s}`;
-  return s.replace(/"/g, '""');
 }
 
 async function listAuditLogs(req, res, next) {
@@ -107,11 +100,11 @@ async function exportAuditLogsCsv(req, res, next) {
       ...rows.map((row) => row.map((v) => `"${csvSafe(v)}"`).join(',')),
     ].join('\n');
 
-    logAuditFromReq(req, {
+    await recordAudit(req, {
       action: 'audit_logs_export_csv',
       resourceType: 'AuditLog',
       metadata: { rows_exported: rows.length, summary: 'Exported audit logs CSV' },
-    }).catch(() => {});
+    });
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="audit-logs-${Date.now()}.csv"`);
@@ -121,39 +114,11 @@ async function exportAuditLogsCsv(req, res, next) {
   }
 }
 
-async function purgeAuditLogs(req, res, next) {
-  try {
-    let retentionDays = Number(req.body?.retention_days);
-    if (!Number.isFinite(retentionDays) || retentionDays < 1) {
-      const settings = await Settings.findOne().select('compliance_settings.data_retention_days').lean();
-      retentionDays = Number(settings?.compliance_settings?.data_retention_days || 365);
-    }
-    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
-    const result = await AuditLog.deleteMany({ createdAt: { $lt: cutoff } });
-    logAuditFromReq(req, {
-      action: 'audit_logs_purge',
-      resourceType: 'AuditLog',
-      metadata: {
-        retention_days: retentionDays,
-        deleted_count: result.deletedCount || 0,
-        summary: `Purged audit logs older than ${retentionDays} days`,
-      },
-    }).catch(() => {});
-    return res.json({
-      retention_days: retentionDays,
-      deleted_count: result.deletedCount || 0,
-      cutoff: cutoff.toISOString(),
-    });
-  } catch (err) {
-    return next(err);
-  }
-}
-
 async function auditIntegrityCheck(req, res, next) {
   try {
     const maxEntries = Math.min(50000, Math.max(1, Number(req.query.max_entries) || 5000));
     const result = await verifyAuditChainIntegrity({ limit: maxEntries });
-    logAuditFromReq(req, {
+    await recordAudit(req, {
       action: 'audit_logs_integrity_check',
       resourceType: 'AuditLog',
       metadata: {
@@ -162,7 +127,7 @@ async function auditIntegrityCheck(req, res, next) {
         issue_count: result.issues.length,
         summary: 'Audit chain integrity verification executed',
       },
-    }).catch(() => {});
+    });
     return res.json(result);
   } catch (err) {
     return next(err);
@@ -174,7 +139,7 @@ async function insiderRiskReport(req, res, next) {
     const windowDays = Math.max(1, Math.min(365, Number(req.query.window_days) || 30));
     const readThreshold = Math.max(10, Number(req.query.read_threshold) || 200);
     const report = await buildInsiderRiskReport({ sinceDays: windowDays, readThreshold });
-    logAuditFromReq(req, {
+    await recordAudit(req, {
       action: 'audit_logs_insider_report',
       resourceType: 'AuditLog',
       metadata: {
@@ -182,7 +147,7 @@ async function insiderRiskReport(req, res, next) {
         flagged_count: report.flagged_count,
         summary: 'Generated insider-risk report',
       },
-    }).catch(() => {});
+    });
     return res.json(report);
   } catch (err) {
     return next(err);
@@ -192,7 +157,6 @@ async function insiderRiskReport(req, res, next) {
 module.exports = {
   listAuditLogs,
   exportAuditLogsCsv,
-  purgeAuditLogs,
   auditIntegrityCheck,
   insiderRiskReport,
 };

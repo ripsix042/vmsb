@@ -4,10 +4,15 @@
  */
 
 const ROLES = {
+  SUPER_ADMIN: 'SuperAdmin',
   ADMIN: 'Admin',
   EMPLOYEE: 'Employee',
   KIOSK_OPERATOR: 'KioskOperator',
 };
+
+function isAdminRole(role) {
+  return role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN;
+}
 
 const USER_STATUS = {
   ACTIVE: 'Active',
@@ -31,6 +36,7 @@ const VISIT_STATUS = {
 
 module.exports = {
   ROLES,
+  isAdminRole,
   USER_STATUS,
   VISIT_TYPE,
   VISIT_STATUS,

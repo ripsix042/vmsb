@@ -1,4 +1,4 @@
-const { VISIT_STATUS, ROLES } = require('../config/constants');
+const { VISIT_STATUS, ROLES, isAdminRole } = require('../config/constants');
 const { conflict, forbidden, badRequest } = require('../utils/errors');
 
 const TERMINAL = new Set([VISIT_STATUS.CHECKED_OUT, VISIT_STATUS.DECLINED, VISIT_STATUS.EXPIRED]);
@@ -18,17 +18,17 @@ function assertVisitTransition({ currentStatus, nextStatus, actorRole, overrideR
   const allowed = ALLOWED_TRANSITIONS[currentStatus] || new Set();
   if (allowed.has(nextStatus)) {
     if (nextStatus === VISIT_STATUS.ON_SITE && actorRole === ROLES.KIOSK_OPERATOR) return;
-    if (nextStatus === VISIT_STATUS.ON_SITE && actorRole !== ROLES.KIOSK_OPERATOR && actorRole !== ROLES.ADMIN && actorRole !== ROLES.EMPLOYEE) {
+    if (nextStatus === VISIT_STATUS.ON_SITE && actorRole !== ROLES.KIOSK_OPERATOR && !isAdminRole(actorRole) && actorRole !== ROLES.EMPLOYEE) {
       throw forbidden('Only authorized staff can check visitors in');
     }
     return;
   }
 
-  if (actorRole === ROLES.ADMIN && !TERMINAL.has(currentStatus) && overrideReason) {
+  if (isAdminRole(actorRole) && !TERMINAL.has(currentStatus) && overrideReason) {
     return;
   }
 
-  if (actorRole === ROLES.ADMIN && !TERMINAL.has(currentStatus) && !overrideReason) {
+  if (isAdminRole(actorRole) && !TERMINAL.has(currentStatus) && !overrideReason) {
     throw badRequest('transition_reason is required for exceptional status change');
   }
 
