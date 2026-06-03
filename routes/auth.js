@@ -4,6 +4,7 @@ const {
   login,
   oktaLogin,
   oktaCallback,
+  oktaExchange,
   refresh,
   logout,
   me,
@@ -40,6 +41,7 @@ const {
   createInviteSchema,
   redeemInviteSchema,
   revokeInviteSchema,
+  oktaExchangeSchema,
 } = require('../validators/auth');
 const { requireAdmin } = require('../middleware/roleCheck');
 const { requireStepUp } = require('../middleware/stepUp');
@@ -97,6 +99,7 @@ router.get('/csrf-token', issueCsrfToken);
 router.post('/login', loginLimiter, validate(loginSchema), login);
 router.get('/okta/login', oktaLogin);
 router.get('/okta/callback', oktaCallback);
+router.post('/okta/exchange', loginLimiter, validate(oktaExchangeSchema), oktaExchange);
 router.post('/register', requirePublicRegistrationEnabled, validate(registerSchema), register);
 router.post('/invites', authenticate, requireAdmin, validate(createInviteSchema), requireStepUp, createInvite);
 router.post('/invites/redeem', validate(redeemInviteSchema), redeemInvite);

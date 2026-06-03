@@ -15,8 +15,9 @@ const requireRole = (...allowedRoles) => {
   };
 };
 
-const requireAdmin = requireRole(ROLES.ADMIN);
-const requireEmployee = requireRole(ROLES.ADMIN, ROLES.EMPLOYEE);
-const requireKiosk = requireRole(ROLES.ADMIN, ROLES.KIOSK_OPERATOR);
+const requireSuperAdmin = requireRole(ROLES.SUPER_ADMIN);
+const requireAdmin = requireRole(ROLES.ADMIN, ROLES.SUPER_ADMIN);
+const requireEmployee = requireRole(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.EMPLOYEE);
+const requireKiosk = requireRole(ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.KIOSK_OPERATOR);
 
-module.exports = { requireRole, requireAdmin, requireEmployee, requireKiosk };
+module.exports = { requireRole, requireSuperAdmin, requireAdmin, requireEmployee, requireKiosk };

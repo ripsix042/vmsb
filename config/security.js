@@ -18,13 +18,19 @@ const getCorsOrigin = () => {
 };
 
 /** Password policy (TRD: bcrypt cost ≥ 10; configurable complexity). */
+const passwordMinLengthEnv = process.env.PASSWORD_MIN_LENGTH;
 const PASSWORD = {
-  MIN_LENGTH: 8,
+  MIN_LENGTH:
+    passwordMinLengthEnv != null && passwordMinLengthEnv !== '' && !Number.isNaN(Number(passwordMinLengthEnv))
+      ? Math.max(8, Number(passwordMinLengthEnv))
+      : 12,
   MAX_LENGTH: 128,
   BCRYPT_ROUNDS: 12,
-  /** Require at least one letter and one number. */
-  requireLetter: true,
+  requireUppercase: true,
+  requireLowercase: true,
   requireNumber: true,
+  requireSpecial: true,
+  HISTORY_COUNT: Math.max(1, Number(process.env.PASSWORD_HISTORY_COUNT || 5)),
 };
 
 /** JWT – industry practice: short-lived access, longer refresh (stored server-side for revocation). */

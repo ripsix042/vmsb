@@ -83,6 +83,7 @@ app.use(`${API_PREFIX}/notifications`, notificationsRoutes);
 app.use(`${API_PREFIX}/settings`, settingsRoutes);
 app.use(`${API_PREFIX}/integration-settings`, integrationSettingsRoutes);
 app.use(`${API_PREFIX}/audit-logs`, auditLogsRoutes);
+app.use(`${API_PREFIX}/analytics`, require('./routes/analytics'));
 app.use(API_PREFIX, publicRoutes);
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

@@ -1,5 +1,6 @@
 /**
  * Create initial admin user. Run: npm run create-admin
+ * Super-admin: npm run create-admin -- --super-admin
  * Prompts for fullName, email, password (or set ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME in .env for non-interactive).
  * Requires MONGODB_URI and JWT_SECRET in .env.
  */
@@ -39,14 +40,16 @@ async function run() {
     return;
   }
   const passwordHash = await bcrypt.hash(password, PASSWORD.BCRYPT_ROUNDS);
+  const superAdmin = process.argv.includes('--super-admin');
+  const role = superAdmin ? ROLES.SUPER_ADMIN : ROLES.ADMIN;
   await User.create({
     fullName: fullName.trim(),
     email: email.trim().toLowerCase(),
     passwordHash,
-    role: ROLES.ADMIN,
+    role,
     status: USER_STATUS.ACTIVE,
   });
-  console.log('Admin user created successfully.');
+  console.log(`${superAdmin ? 'SuperAdmin' : 'Admin'} user created successfully.`);
   if (isConfigured()) {
     const { sent } = await sendWelcomeEmail(email.trim().toLowerCase(), fullName.trim());
     if (sent) console.log('Welcome email sent.');

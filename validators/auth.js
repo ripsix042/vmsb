@@ -111,7 +111,7 @@ const createInviteSchema = Joi.object({
     .lowercase()
     .messages({ 'string.empty': 'Email is required' }),
   fullName: Joi.string().required().min(2).max(120).trim(),
-  role: Joi.string().required().valid('Admin', 'Employee', 'KioskOperator'),
+  role: Joi.string().required().valid('SuperAdmin', 'Admin', 'Employee', 'KioskOperator'),
   redirect_url: Joi.string().uri().max(1000).optional(),
   step_up_password: Joi.string().required().max(PASSWORD.MAX_LENGTH),
   step_up_code: Joi.string().length(6).optional(),
@@ -133,6 +133,10 @@ const revokeInviteSchema = Joi.object({
   step_up_code: Joi.string().length(6).optional(),
 });
 
+const oktaExchangeSchema = Joi.object({
+  code: Joi.string().required().trim().messages({ 'string.empty': 'Exchange code is required' }),
+});
+
 module.exports = {
   loginSchema,
   registerSchema,
@@ -148,4 +152,5 @@ module.exports = {
   createInviteSchema,
   redeemInviteSchema,
   revokeInviteSchema,
+  oktaExchangeSchema,
 };

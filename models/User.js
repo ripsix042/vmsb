@@ -7,6 +7,16 @@ const userSchema = new mongoose.Schema(
     fullName: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true, select: false },
+    passwordHistory: {
+      type: [
+        {
+          hash: { type: String, required: true },
+          changedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+      select: false,
+    },
     phone: { type: String, trim: true, default: null },
     role: {
       type: String,
@@ -24,6 +34,7 @@ const userSchema = new mongoose.Schema(
     failedLoginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Date, default: null },
     lastFailedLoginAt: { type: Date, default: null },
+    sessionVersion: { type: Number, default: 0 },
     /** Set once via PATCH /users/me/department (admin & employee only). Denormalized name for API responses. */
     departmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Department', default: null },
     departmentName: { type: String, default: null, trim: true, maxlength: 120 },

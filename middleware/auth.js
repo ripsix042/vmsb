@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { isSessionVersionValid } = require('../utils/sessionToken');
 
 /**
  * Access token from Authorization header only (industry practice: short-lived, client sends in header).
@@ -25,6 +26,9 @@ const authenticate = async (req, res, next) => {
     const user = await User.findById(decoded.userId).select('-passwordHash');
     if (!user) {
       return res.status(401).json({ error: 'Unauthorized', message: 'User not found' });
+    }
+    if (!isSessionVersionValid(decoded, user)) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Session expired' });
     }
     if (user.status !== 'Active') {
       return res.status(401).json({ error: 'Unauthorized', message: 'Account inactive' });

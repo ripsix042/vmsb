@@ -9,6 +9,7 @@
     "seed:reasons": "node scripts/seedReasons.js",
     "seed:departments": "node scripts/seedDepartments.js",
     "create-admin": "node scripts/createAdmin.js",
+    "purge:audit-retention": "node scripts/purgeAuditRetention.js",
     "security:audit": "npm audit --omit=dev --audit-level=high"
   },
   "engines": {
@@ -25,6 +26,7 @@
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.6.0",
+    "node-cron": "^3.0.3",
     "nodemailer": "^8.0.4",
     "openid-client": "^5.6.5",
     "socket.io": "^4.8.3"

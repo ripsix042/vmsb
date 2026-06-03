@@ -5,7 +5,7 @@ const User = require('../models/User');
 const { generateVisitId } = require('../utils/visitId');
 const { notFound, forbidden, badRequest } = require('../utils/errors');
 const { VISIT_TYPE, VISIT_STATUS } = require('../config/constants');
-const { ROLES } = require('../config/constants');
+const { ROLES, isAdminRole } = require('../config/constants');
 const { emitToUser } = require('../services/socket');
 const { assertVisitTransition } = require('../services/visitStateMachine');
 
@@ -64,7 +64,7 @@ async function createVisitRequest(req, res, next) {
 
 async function listVisitRequests(req, res, next) {
   try {
-    const isAdmin = req.user.role === ROLES.ADMIN;
+    const isAdmin = isAdminRole(req.user.role);
     const filter = isAdmin
       ? { visitType: VISIT_TYPE.WALK_IN }
       : { visitType: VISIT_TYPE.WALK_IN, hostId: req.user._id };
@@ -96,7 +96,7 @@ async function updateVisitRequest(req, res, next) {
     const visit = await Visit.findById(id);
     if (!visit) throw notFound('Visit request not found');
     if (visit.visitType !== VISIT_TYPE.WALK_IN) throw notFound('Visit request not found');
-    const isAdmin = req.user.role === ROLES.ADMIN;
+    const isAdmin = isAdminRole(req.user.role);
     const isHost = visit.hostId.toString() === req.user._id.toString();
     if (!isAdmin && !isHost) throw forbidden('You can only approve or decline your own walk-in requests');
     if (visit.status !== VISIT_STATUS.PENDING_APPROVAL) {

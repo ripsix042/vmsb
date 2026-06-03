@@ -2,9 +2,8 @@ const Settings = require('../models/Settings');
 const IntegrationSettings = require('../models/IntegrationSettings');
 const Visit = require('../models/Visit');
 const Notification = require('../models/Notification');
-const AuditLog = require('../models/AuditLog');
 const { sanitizeForMongo } = require('../utils/sanitize');
-const { logAuditFromReq } = require('../services/auditLog');
+const { recordAudit } = require('../services/auditLog');
 const { maskPiiDeep } = require('../utils/piiMask');
 
 const defaultSettings = {
@@ -70,6 +69,15 @@ async function updateSettings(req, res, next) {
     await doc.save();
     const out = doc.toObject();
     const { _id, __v, createdAt, updatedAt, ...rest } = out;
+    await recordAudit(req, {
+      action: 'settings_updated',
+      resourceType: 'Settings',
+      resourceId: doc._id.toString(),
+      metadata: {
+        changed_sections: Object.keys(updates),
+        summary: `System settings updated (${Object.keys(updates).join(', ')})`,
+      },
+    });
     res.json(rest);
   } catch (err) {
     next(err);
@@ -105,6 +113,15 @@ async function updateIntegrationSettings(req, res, next) {
     await doc.save();
     const out = doc.toObject();
     const { _id, __v, createdAt, updatedAt, ...rest } = out;
+    await recordAudit(req, {
+      action: 'integration_settings_updated',
+      resourceType: 'IntegrationSettings',
+      resourceId: doc._id.toString(),
+      metadata: {
+        changed_keys: Object.keys(updates),
+        summary: `Integration settings updated (${Object.keys(updates).join(', ')})`,
+      },
+    });
     res.json(maskPiiDeep(rest));
   } catch (err) {
     next(err);
@@ -118,29 +135,26 @@ async function purgeRetentionData(req, res, next) {
       Number(req.body?.retention_days) || Number(process.env.RETENTION_DAYS_DEFAULT || 365)
     );
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
-    const [visits, notifications, auditLogs] = await Promise.all([
+    const [visits, notifications] = await Promise.all([
       Visit.deleteMany({ createdAt: { $lt: cutoff }, status: { $in: ['checked_out', 'expired', 'declined'] } }),
       Notification.deleteMany({ createdAt: { $lt: cutoff } }),
-      AuditLog.deleteMany({ createdAt: { $lt: cutoff } }),
     ]);
-    logAuditFromReq(req, {
+    await recordAudit(req, {
       action: 'retention_purge',
       resourceType: 'Settings',
       metadata: {
         retention_days: retentionDays,
         deleted_visits: visits.deletedCount || 0,
         deleted_notifications: notifications.deletedCount || 0,
-        deleted_audit_logs: auditLogs.deletedCount || 0,
-        summary: `Retention purge executed for ${retentionDays} days`,
+        summary: `Visitor data retention purge (${retentionDays} days; audit logs unchanged)`,
       },
-    }).catch(() => {});
+    });
     res.json({
       retention_days: retentionDays,
       cutoff: cutoff.toISOString(),
       deleted: {
         visits: visits.deletedCount || 0,
         notifications: notifications.deletedCount || 0,
-        audit_logs: auditLogs.deletedCount || 0,
       },
     });
   } catch (err) {

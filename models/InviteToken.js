@@ -12,7 +12,11 @@ const inviteTokenSchema = new mongoose.Schema(
   {
     email: { type: String, required: true, lowercase: true, trim: true },
     fullName: { type: String, required: true, trim: true, maxlength: 120 },
-    role: { type: String, required: true, enum: [ROLES.ADMIN, ROLES.EMPLOYEE, ROLES.KIOSK_OPERATOR] },
+    role: {
+      type: String,
+      required: true,
+      enum: [ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.EMPLOYEE, ROLES.KIOSK_OPERATOR],
+    },
     tokenHash: { type: String, required: true, unique: true },
     status: {
       type: String,

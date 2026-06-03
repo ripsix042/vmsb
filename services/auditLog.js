@@ -138,4 +138,28 @@ function logAuditFromReq(req, options) {
   });
 }
 
-module.exports = { logAudit, logAuditFromReq, verifyAuditChainIntegrity, buildInsiderRiskReport };
+function isAuditLogStrict() {
+  return process.env.AUDIT_LOG_STRICT === 'true';
+}
+
+/**
+ * Write audit log; when AUDIT_LOG_STRICT=true, await and propagate errors.
+ */
+async function recordAudit(req, options) {
+  const promise = logAuditFromReq(req, options);
+  if (isAuditLogStrict()) {
+    await promise;
+  } else {
+    promise.catch(() => {});
+  }
+}
+
+module.exports = {
+  logAudit,
+  logAuditFromReq,
+  recordAudit,
+  isAuditLogStrict,
+  verifyAuditChainIntegrity,
+  buildInsiderRiskReport,
+};
+
